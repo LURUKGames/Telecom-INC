@@ -637,13 +637,14 @@ class UniversalConfigWindow(Window):
         self._mode_hits = []
         self._vlan_hits = []
 
-        # Футер: LACP, Commut, Save
+        # Футер: LACP, Commut, Save (без Setting Group и Unmerge)
         self._btn_lacp = pygame.Rect(0, 0, 0, 0)
         self._btn_commut = pygame.Rect(0, 0, 0, 0)
         self._btn_save = pygame.Rect(0, 0, 0, 0)
 
         self._compute_content_height()
 
+    # ---- подготовка ----
     def _visible_devices(self, devices):
         return [d for d in devices if not d.get("is_merged_into")]
 
@@ -690,6 +691,7 @@ class UniversalConfigWindow(Window):
                 return d
         return None
 
+    # ---- layout + hit-boxes ----
     def _sync_positions(self):
         cr = self.content_rect()
         self._section_hits = []
@@ -730,6 +732,7 @@ class UniversalConfigWindow(Window):
             if ti is not None:
                 ti.set_rect(rect)
 
+        # Футер: LACP (слева), Commut (рядом), Save (справа)
         fx = self.x + 10
         fy = self.y + self.height - UCW_FOOTER_H + 10
         bw, bh, gap = 110, 30, 6
@@ -742,6 +745,7 @@ class UniversalConfigWindow(Window):
             return True
         return any(ti.active for ti in self.inputs.values())
 
+    # ---- режимы ----
     def _enter_mode(self, mode):
         if self.mode == mode:
             self._exit_mode()
@@ -749,7 +753,8 @@ class UniversalConfigWindow(Window):
         self._exit_mode()
         self.mode = mode
         if mode == self.MODE_COMMUT:
-            print("Режим COMMUT: кликай по заголовкам устройств; повторный LKM — снять")
+            print("Режим COMMUT: кликай по заголовкам, чтобы выбрать 2+ устройства для слияния.")
+            print("Если устройство уже шасси (плат > 1) — клик по нему разъединит его.")
         elif mode == self.MODE_LACP:
             print("Режим LACP: кликай по овалам Link у физпортов; повторный LKM — снять")
 
@@ -773,12 +778,39 @@ class UniversalConfigWindow(Window):
             other = self._find_equip(oid)
             if other is not None:
                 self.game.merge_equipment(host, other)
+        
+        # Обновляем список устройств после слияния
         self.devices = self._visible_devices(self.devices)
         self._init_fields()
         self._build_inputs()
         self._compute_content_height()
         self.active_section_eid = host["id"]
         self._exit_mode()
+
+    def _do_unmerge(self, eq):
+        if len(eq.get("boards", [])) < 2:
+            return
+        last = max(eq["boards"], key=lambda b: b["board_id"])
+        ok, mixed = self.game.can_unmerge(eq, last["board_id"])
+        if mixed:
+            if getattr(self, "_pending_unmerge", None) == last["board_id"]:
+                self.game.unmerge_equipment(eq, last["board_id"], force=True)
+                self._pending_unmerge = None
+            else:
+                self._pending_unmerge = last["board_id"]
+                print(f"Unmerge: LACP будет сломан ({', '.join(mixed)}). Повторный клик по заголовку — подтвердить.")
+                return
+        else:
+            self.game.unmerge_equipment(eq, last["board_id"])
+        
+        # Возвращаем "вынырнувшее" устройство обратно в список
+        for d in self.game.equipment:
+            if (d["x"], d["y"]) == (eq["x"], eq["y"]) and not d.get("is_merged_into"):
+                if d not in self.devices:
+                    self.devices.append(d)
+        self._init_fields()
+        self._build_inputs()
+        self._compute_content_height()
 
     def _confirm_lacp(self):
         if len(self.selected_ports) < 2:
@@ -804,35 +836,6 @@ class UniversalConfigWindow(Window):
         self._build_inputs()
         self._compute_content_height()
         self._exit_mode()
-
-    def _do_unmerge(self):
-        eq = self._find_equip(self.active_section_eid)
-        if eq is None:
-            return
-        if len(eq.get("boards", [])) < 2:
-            print("Unmerge: у устройства одна плата — нечего разъединять")
-            return
-        last = max(eq["boards"], key=lambda b: b["board_id"])
-        ok, mixed = self.game.can_unmerge(eq, last["board_id"])
-        if mixed:
-            if getattr(self, "_pending_unmerge", None) == last["board_id"]:
-                self.game.unmerge_equipment(eq, last["board_id"], force=True)
-                self._pending_unmerge = None
-            else:
-                self._pending_unmerge = last["board_id"]
-                print(f"Unmerge: LACP будет сломан ({', '.join(mixed)}). Повторный клик — подтвердить.")
-                return
-        else:
-            self.game.unmerge_equipment(eq, last["board_id"])
-        
-        # Возвращаем "вынырнувшее" устройство обратно в список
-        for d in self.game.equipment:
-            if (d["x"], d["y"]) == (eq["x"], eq["y"]) and not d.get("is_merged_into"):
-                if d not in self.devices:
-                    self.devices.append(d)
-        self._init_fields()
-        self._build_inputs()
-        self._compute_content_height()
 
     def _toggle_admin_state(self, obj):
         st = obj.get("admin_state", "up")
@@ -861,6 +864,7 @@ class UniversalConfigWindow(Window):
         if self.manager is not None:
             self.popup.manager = self.manager
 
+    # ---- события ----
     def handle_event(self, event):
         if self.popup is not None:
             handled = self.popup.handle_event(event)
@@ -896,14 +900,17 @@ class UniversalConfigWindow(Window):
 
             # 2. Контент
             if self.content_rect().collidepoint(event.pos):
-                # Заголовки секций
+                
+                # 2.1 Заголовки секций (Commut или выбор активной)
                 for rect, equip in self._section_hits:
                     if rect.collidepoint(event.pos):
                         if self.mode == self.MODE_COMMUT:
                             if len(equip.get("boards", [])) > 1:
+                                # Если уже шасси -> разъединяем
                                 self.active_section_eid = equip["id"]
-                                self._do_unmerge()
+                                self._do_unmerge(equip)
                             else:
+                                # Иначе -> добавляем/убираем из выбора
                                 if equip["id"] in self.selected_devices:
                                     self.selected_devices.discard(equip["id"])
                                 else:
@@ -912,7 +919,7 @@ class UniversalConfigWindow(Window):
                             self.active_section_eid = equip["id"]
                         return True
 
-                # Остальные клики (Link, Speed, Mode, VLAN, Desc)
+                # 2.2 Остальные элементы (Link, Speed, Mode, VLAN, Desc)
                 for rect, equip, pi, kind, ref in self._link_hits:
                     if rect.collidepoint(event.pos):
                         if self.mode == self.MODE_LACP and kind == "port":
@@ -979,6 +986,7 @@ class UniversalConfigWindow(Window):
                         break
         print("Настройки применены")
 
+    # ---- отрисовка ----
     def _draw_link_pill(self, screen, rect, state):
         color = COLOR_LINK_UP if state == "up" else COLOR_LINK_DOWN
         text = state
@@ -1004,11 +1012,10 @@ class UniversalConfigWindow(Window):
             ry = y - self.scroll_y
             hdr_rect = pygame.Rect(0, ry, surface.get_width(), UCW_SECTION_HDR_H)
             
-            # Подсветка: выбран (синий) или просто активный (темно-синий)
+            # Подсветка заголовка
             if self.mode == self.MODE_COMMUT and equip["id"] in self.selected_devices:
                 pygame.draw.rect(surface, COLOR_SEL_SECTION, hdr_rect)
-                # Голубой контур вокруг заголовка
-                pygame.draw.rect(surface, (100, 200, 255), hdr_rect, 2)
+                pygame.draw.rect(surface, (100, 200, 255), hdr_rect, 2) # голубой контур
             elif equip["id"] == self.active_section_eid:
                 pygame.draw.rect(surface, (50, 70, 100), hdr_rect)
 
@@ -1056,7 +1063,10 @@ class UniversalConfigWindow(Window):
     def _draw_mode_banner(self, screen):
         if self.mode == self.MODE_NORMAL: return
         pygame.draw.rect(screen, COLOR_MODE_BANNER, pygame.Rect(self.x, self.y + HEADER_H - 2, self.width, 4))
-        txt = "Режим COMMUT: выбирай заголовки устройств" if self.mode == self.MODE_COMMUT else "Режим LACP: выбирай овалы Link у физпортов"
+        if self.mode == self.MODE_COMMUT:
+            txt = "Режим COMMUT: LKM по заголовку — выбрать/разъединить. Выбери 2+ и нажми Commut для слияния."
+        else:
+            txt = "Режим LACP: выбирай овалы Link у физпортов"
         surf = self._tiny.render(txt, True, (200, 220, 255))
         screen.blit(surf, (self.x + 10, self.y + HEADER_H + 2))
 
@@ -1191,12 +1201,8 @@ class UniversalConfigWindow(Window):
                     else:
                         self._enter_mode(self.MODE_COMMUT)
                     return True
-                if self._btn_setting.collidepoint(event.pos):
-                    self._open_setting_group()
-                    return True
-                if self._btn_unmerge.collidepoint(event.pos):
-                    self._do_unmerge()
-                    return True
+                 
+                
 
                 # 2. Контент (ЗАГОЛОВКИ, LINK, SPEED, MODE, VLAN, DESC)
                 self._sync_positions()
@@ -1482,8 +1488,7 @@ class UniversalConfigWindow(Window):
                                selected=(self.mode == self.MODE_LACP))
         self._draw_mini_button(screen, self._btn_commut, "Commut",
                                selected=(self.mode == self.MODE_COMMUT))
-        self._draw_mini_button(screen, self._btn_setting, "Setting Group")
-        self._draw_mini_button(screen, self._btn_unmerge, "Unmerge")
+        
         self._draw_mini_button(screen, self._btn_save, "Save")
 
         if self.popup is not None:
