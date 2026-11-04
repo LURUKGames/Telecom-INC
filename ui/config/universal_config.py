@@ -1,11 +1,5 @@
 #!/usr/bin/env python3
-"""
-ui/universal_config.py - Главное окно настройки оборудования в доме (UCW).
-Показывает список всех устройств, их порты, LACP-группы, позволяет
-настраивать скорость, режим (access/trunk) и VLAN.
-"""
-
-
+"""ui/universal_config.py - Главное окно настройки оборудования (UCW)."""
 
 import pygame
 from config import (
@@ -54,38 +48,29 @@ COLOR_BTN_DIS_EDGE = (95, 95, 105)
 COLOR_SEL_SECTION = (70, 130, 200)
 COLOR_MODE_BANNER = (50, 90, 150)
 
-# --- Хелперы ---
 def _ensure_port_fields(port):
-    """Гарантирует, что у порта есть все нужные поля."""
     port.setdefault("admin_state", "up")
     port.setdefault("vlan_string", "")
     port.setdefault("mode", "access")
 
 def _ensure_lacp_fields(grp):
-    """Гарантирует, что у LACP-группы есть все нужные поля."""
     grp.setdefault("admin_state", "up")
     grp.setdefault("vlan_string", "")
     grp.setdefault("mode", "trunk")
     grp.setdefault("label", "")
 
 def _port_link_state(port):
-    """Возвращает статус порта: up / down / shut."""
-    if port.get("admin_state", "up") == "shut":
-        return "shut"
+    if port.get("admin_state", "up") == "shut": return "shut"
     return "down" if port.get("free", True) else "up"
 
 def _lacp_link_state(equip, grp):
-    """LACP горит зеленым, если хотя бы один порт из группы имеет линк."""
-    if grp.get("admin_state", "up") == "shut":
-        return "shut"
+    if grp.get("admin_state", "up") == "shut": return "shut"
     for pi in grp["ports"]:
         if 0 <= pi < len(equip["ports"]):
-            if not equip["ports"][pi].get("free", True):
-                return "up"
+            if not equip["ports"][pi].get("free", True): return "up"
     return "down"
 
 def _vlan_preview(text):
-    """Показывает первые 4 VLAN'а внутри кнопки."""
     if not text: return "VLAN"
     import re
     parts = [p.strip() for p in re.split(r"[,\n]", text) if p.strip()]
@@ -95,21 +80,14 @@ def _vlan_preview(text):
     return ",".join(shown) + suffix
 
 def _find_cable_100(game, equip_id, port_index):
-    """Проверяет, подключен ли к порту кабель 100Мб (чтобы заблокировать смену скорости)."""
     if game is None: return False
     for cable in game.cables:
         a_match = cable["a"] == equip_id and cable["port_a"] == port_index
         b_match = cable.get("b") == equip_id and cable.get("port_b") == port_index
-        if a_match or b_match:
-            return cable["type"] == "cable_100"
+        if a_match or b_match: return cable["type"] == "cable_100"
     return False
 
-
 class UniversalConfigWindow(Window):
-    """
-    Главное окно. Собирает в себе все устройства дома.
-    Обрабатывает настройки портов, создание LACP и коммутацию.
-    """
     def __init__(self, devices, screen_w, screen_h, game=None):
         w, h = 720, 620
         x = (screen_w - w) // 2
@@ -149,20 +127,16 @@ class UniversalConfigWindow(Window):
         for equip in self.devices:
             equip.setdefault("lacp_groups", [])
             equip.setdefault("boards", [{"board_id": 1, "port_range": (0, len(equip["ports"]))}])
-            for port in equip["ports"]:
-                _ensure_port_fields(port)
-            for grp in equip["lacp_groups"]:
-                _ensure_lacp_fields(grp)
+            for port in equip["ports"]: _ensure_port_fields(port)
+            for grp in equip["lacp_groups"]: _ensure_lacp_fields(grp)
 
     def _build_inputs(self):
         self.inputs = {}
         for equip in self.devices:
             for i, port in enumerate(equip["ports"]):
-                self.inputs[("port", equip["id"], i)] = TextInput(
-                    (0, 0, UCW_DESC_W, 26), initial_text=port.get("label", ""), max_length=15)
+                self.inputs[("port", equip["id"], i)] = TextInput((0,0,UCW_DESC_W,26), initial_text=port.get("label",""), max_length=15)
             for grp in equip["lacp_groups"]:
-                self.inputs[("lacp", equip["id"], grp["id"])] = TextInput(
-                    (0, 0, UCW_DESC_W, 26), initial_text=grp.get("label", ""), max_length=15)
+                self.inputs[("lacp", equip["id"], grp["id"])] = TextInput((0,0,UCW_DESC_W,26), initial_text=grp.get("label",""), max_length=15)
 
     def content_rect(self):
         return pygame.Rect(self.x, self.y + HEADER_H, self.width, self.height - HEADER_H - UCW_FOOTER_H)
@@ -188,14 +162,9 @@ class UniversalConfigWindow(Window):
         return None
 
     def _sync_positions(self):
-        """Пересчитывает хитбоксы (где находятся кнопки) в зависимости от прокрутки."""
         cr = self.content_rect()
-        self._section_hits = []
-        self._link_hits = []
-        self._desc_rects = {}
-        self._speed_hits = []
-        self._mode_hits = []
-        self._vlan_hits = []
+        self._section_hits, self._link_hits, self._desc_rects = [], [], {}
+        self._speed_hits, self._mode_hits, self._vlan_hits = [], [], []
 
         y = 10
         for equip in self.devices:
@@ -203,7 +172,7 @@ class UniversalConfigWindow(Window):
             self._section_hits.append((pygame.Rect(cr.x, ry, cr.width, UCW_SECTION_HDR_H), equip))
             y += self.row_h
             
-            for i, port in enumerate(equip["ports"]):
+            for i in range(len(equip["ports"])):
                 ry = cr.y + y - self.scroll_y
                 self._link_hits.append((pygame.Rect(cr.x + UCW_X_LINK, ry + 10, UCW_LINK_W, UCW_LINK_H), equip, i, "port", None))
                 self._desc_rects[("port", equip["id"], i)] = pygame.Rect(cr.x + UCW_X_DESC, ry + 10, UCW_DESC_W, 26)
@@ -224,7 +193,7 @@ class UniversalConfigWindow(Window):
 
         for key, rect in self._desc_rects.items():
             ti = self.inputs.get(key)
-            if ti is not None: ti.set_rect(rect)
+            if ti: ti.set_rect(rect)
 
         fx = self.x + 10
         fy = self.y + self.height - UCW_FOOTER_H + 10
@@ -253,42 +222,35 @@ class UniversalConfigWindow(Window):
                         g["name"] = name
                         break
             else:
-                g = {"id": gid, "name": name, "ports": ports, "speed": 1000,
-                     "label": "", "mode": "trunk", "vlan_string": "", "admin_state": "up"}
+                g = {"id": gid, "name": name, "ports": ports, "speed": 1000, "label": "", "mode": "trunk", "vlan_string": "", "admin_state": "up"}
                 eq.setdefault("lacp_groups", []).append(g)
             _notify_speed_changed(self.game)
             self._build_inputs()
             self._compute_content_height()
         self.popup = LACPInputWindow(self.devices, self.game, None, on_submit, sw, sh)
 
-        def _open_merge_window(self):
-            sw, sh = _screen_size()
-            def on_merge(host_id, other_ids, name, is_new, remove_board_ids):
-                host = self._find_equip(host_id)
-                if not host: return
-                
-                # 1. Отсоединяем платы (если редактировали)
-                for bid in remove_board_ids:
-                    if bid == 1: continue # Базовую плату 1 не трогаем
-                    self.game.unmerge_equipment(host, bid)
-                    
-                # 2. Присоединяем новые
-                for oid in other_ids:
-                    other = self._find_equip(oid)
-                    if other: 
-                        self.game.merge_equipment(host, other)
-                
-                # 3. Применяем имя (сработает и для создания, и для редактирования)
-                if name:
-                    host["name"] = name
-                    
-                # 4. Обновляем UI
-                self.devices = self._visible_devices(self.devices)
-                self._init_fields()
-                self._build_inputs()
-                self._compute_content_height()
-                self.active_section_eid = host["id"]
-            self.popup = CommutWindow(self.devices, self.game, on_merge, sw, sh)
+    def _open_merge_window(self):
+        sw, sh = _screen_size()
+        def on_merge(host_id, other_ids, name, is_new, remove_board_ids):
+            host = self._find_equip(host_id)
+            if not host: return
+            # Отсоединяем
+            for bid in remove_board_ids:
+                if bid != 1: self.game.unmerge_equipment(host, bid)
+            # Присоединяем
+            for oid in other_ids:
+                other = self._find_equip(oid)
+                if other: self.game.merge_equipment(host, other)
+            # Имя
+            if name: host["name"] = name
+            # Обновляем список (подтягиваем вынырнувшие)
+            loc = (host["x"], host["y"])
+            self.devices = [d for d in self.game.equipment_at.get(loc, []) if not d.get("is_merged_into")]
+            self._init_fields()
+            self._build_inputs()
+            self._compute_content_height()
+            self.active_section_eid = host["id"]
+        self.popup = CommutWindow(self.devices, self.game, on_merge, sw, sh)
 
     def _toggle_admin_state(self, obj):
         obj["admin_state"] = "up" if obj.get("admin_state", "up") == "shut" else "shut"
@@ -318,7 +280,6 @@ class UniversalConfigWindow(Window):
             if self.popup is not None and self.popup.is_closed: self.popup = None
             return handled or True
 
-        # Если клик по ползунку скролла - отдаем базовому классу, чтобы он его потаскал
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             thumb = self._scrollbar_thumb()
             if thumb and thumb.collidepoint(event.pos):
@@ -332,12 +293,9 @@ class UniversalConfigWindow(Window):
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             self._sync_positions()
 
-            if self._btn_save.collidepoint(event.pos):
-                self._save(); return True
-            if self._btn_lacp.collidepoint(event.pos):
-                self._open_lacp_window(); return True
-            if self._btn_commut.collidepoint(event.pos):
-                self._open_merge_window(); return True
+            if self._btn_save.collidepoint(event.pos): self._save(); return True
+            if self._btn_lacp.collidepoint(event.pos): self._open_lacp_window(); return True
+            if self._btn_commut.collidepoint(event.pos): self._open_merge_window(); return True
 
             if self.content_rect().collidepoint(event.pos):
                 for rect, equip in self._section_hits:
@@ -522,5 +480,3 @@ class UniversalConfigWindow(Window):
 
         if self.popup is not None:
             self.popup.draw(screen, font, small_font)
-            
-            
