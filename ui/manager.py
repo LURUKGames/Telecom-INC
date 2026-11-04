@@ -25,11 +25,6 @@ class UIWindowManager:
         sw, sh = self._screen_size()
         self.active_window = HouseWindow(house, sw, sh, game=self.game)
 
-    def open_equipment_choice(self, devices, game):
-        if not devices:
-            return
-        sw, sh = self._screen_size()
-        self.active_window = EquipmentChoiceWindow(devices, sw, sh, game=game)
 
     def open_switch(self, equipment_list):
         if not equipment_list:
