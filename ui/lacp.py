@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ui/lacp.py - мини-окно создания LACP (выбор портов кликом по сетке)."""
+"""ui/lacp.py - мини-окно создания LACP (выбор портов кликом по сетке x/x)."""
 
 import pygame
 
@@ -9,6 +9,7 @@ from config import (
 )
 from ui.base import Window
 from ui.widgets import _vgrad_rect, draw_button_screen
+from ui.chassis import port_name
 
 
 class LACPInputWindow(Window):
@@ -17,22 +18,23 @@ class LACPInputWindow(Window):
         self.is_selectable = is_selectable      # func(port_index) -> bool
         n = len(equip["ports"])
         self.cols = 6
-        self.box = 40
+        self.box = 48
         self.gap = 8
         rows = (n + self.cols - 1) // self.cols
         grid_h = rows * (self.box + self.gap)
         w = 60 + self.cols * (self.box + self.gap)
         h = HEADER_H + 40 + grid_h + 60
-        w = max(w, 360)
+        w = max(w, 400)
         x = (screen_w - w) // 2
         y = (screen_h - h) // 2
         super().__init__(x, y, w, h, "LACP: выбери порты кликом")
+        self.resizable = False
         self.callback = callback
         self.selected = set()
         self._cells = []
         self._ok_btn = pygame.Rect(0, 0, 0, 0)
         self._cancel_btn = pygame.Rect(0, 0, 0, 0)
-        self._tiny = pygame.font.SysFont("arial,dejavusans", 12)
+        self._tiny = pygame.font.SysFont("arial,dejavusans", 11)
 
     def is_text_input_active(self):
         return False
@@ -48,8 +50,8 @@ class LACPInputWindow(Window):
             py = start_y + r * (self.box + self.gap)
             self._cells.append((pygame.Rect(px, py, self.box, self.box), i))
         by = self.y + self.height - 44
-        self._ok_btn = pygame.Rect(self.x + 20, by, 140, 32)
-        self._cancel_btn = pygame.Rect(self.x + self.width - 160, by, 140, 32)
+        self._ok_btn = pygame.Rect(self.x + 20, by, 160, 32)
+        self._cancel_btn = pygame.Rect(self.x + self.width - 180, by, 160, 32)
 
     def _submit(self):
         cb = self.callback
@@ -72,6 +74,9 @@ class LACPInputWindow(Window):
             if self.close_rect().collidepoint(event.pos):
                 self.close()
                 return True
+            if self.back_rect().collidepoint(event.pos):
+                self.close()
+                return True
             if self._ok_btn.collidepoint(event.pos):
                 self._submit()
                 return True
@@ -86,7 +91,8 @@ class LACPInputWindow(Window):
             for rect, i in self._cells:
                 if rect.collidepoint(event.pos):
                     if not self.is_selectable(i):
-                        print(f"Порт {i + 1} уже занят LACP-группой")
+                        print(f"Порт {port_name(None, self.equip, i)} "
+                              f"уже в другой LACP-группе")
                         return True
                     if i in self.selected:
                         self.selected.discard(i)
@@ -115,12 +121,16 @@ class LACPInputWindow(Window):
             _vgrad_rect(screen, rect,
                         tuple(min(255, c + 30) for c in base), base, radius=6)
             edge = (255, 255, 255) if (i in self.selected) else COLOR_PORT_EDGE
-            pygame.draw.rect(screen, edge, rect, 2 if (hover or i in self.selected) else 1,
+            pygame.draw.rect(screen, edge, rect,
+                             2 if (hover or i in self.selected) else 1,
                              border_radius=6)
-            num = small_font.render(str(i + 1), True, COLOR_TEXT)
+            # Имя x/x
+            pname = port_name(None, self.equip, i)
+            num = small_font.render(pname, True, COLOR_TEXT)
             screen.blit(num, (rect.centerx - num.get_width() // 2,
                               rect.centery - num.get_height() // 2))
         draw_button_screen(screen, small_font, self._ok_btn,
                            f"✔ Создать ({len(self.selected)})")
         draw_button_screen(screen, small_font, self._cancel_btn, "Отмена")
+        
         

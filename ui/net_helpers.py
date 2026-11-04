@@ -65,10 +65,12 @@ def equip_type_label(equip):
 def port_status_text_color(game, equip, port_index):
     port = equip["ports"][port_index]
     grp = port_in_lacp(equip, port_index)
-    if grp is not None:
-        return f"В составе {grp['name']}", COLOR_STATUS_LACP
     if port["free"]:
+        if grp is not None:
+            return f"В составе {grp['name']}", COLOR_STATUS_LACP
         return "Down", COLOR_STATUS_DOWN
+    # Порт физически используется — статус отражает кабель,
+    # даже если он входит в LACP (физика важнее для диагностики).
     cable = find_cable_for_port(game, equip["id"], port_index)
     if cable is not None:
         if cable.get("speed_mismatch"):
@@ -80,15 +82,16 @@ def port_status_text_color(game, equip, port_index):
         if conn.get("to_dc"):
             tar = conn.get("tariff", "ЦОД")
             return f"Магистраль [{tar}]", COLOR_TARIFF
-        return f"Up #{conn['to_id']}:{conn['to_port'] + 1}", COLOR_STATUS_UP
+        suffix = f" ({grp['name']})" if grp is not None else ""
+        return f"Up #{conn['to_id']}:{conn['to_port'] + 1}{suffix}", COLOR_STATUS_UP
     return "Up", COLOR_STATUS_UP
 
 
 def port_fill_color(game, equip, port_index, hover=False):
     port = equip["ports"][port_index]
-    if port_in_lacp(equip, port_index) is not None:
-        return COLOR_PORT_LACP
     if port["free"]:
+        if port_in_lacp(equip, port_index) is not None:
+            return COLOR_PORT_LACP
         return COLOR_PORT_DOWN_HI if hover else COLOR_PORT_DOWN
     cable = find_cable_for_port(game, equip["id"], port_index)
     if cable is not None:
@@ -104,3 +107,4 @@ def lacp_effective_label(equip, port_index):
     if grp is not None:
         return grp["name"]
     return equip["ports"][port_index].get("label", "")
+
