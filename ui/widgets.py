@@ -81,12 +81,15 @@ def draw_button_screen(screen, font, rect, text, active=False):
     draw_fancy_button(screen, font, rect, text, state)
 
 
+# ... (начало файла widgets.py без изменений: импорты, speed_label, _screen_size, _vgrad_rect, draw_fancy_button и т.д.)
+
 class TextInput:
-    def __init__(self, rect, initial_text="", max_length=15):
+    def __init__(self, rect, initial_text="", max_length=15, allowed_chars=None):
         self.rect = pygame.Rect(rect)
         self.text = initial_text
         self.active = False
         self.max_length = max_length
+        self.allowed_chars = allowed_chars  # <--- НОВОЕ: фильтр символов
         self.cursor_pos = len(initial_text)
         self._cursor_timer = 0
 
@@ -153,8 +156,13 @@ class TextInput:
                     self.text = self.text[:self.cursor_pos] + self.text[self.cursor_pos + 1:]
                 self._cursor_timer = 0
                 return True
+            
             ch = event.unicode
             if ch and ch.isprintable() and len(self.text) < self.max_length:
+                # ВАЛИДАЦИЯ: проверяем, разрешен ли символ (если задан фильтр)
+                if self.allowed_chars is not None and ch not in self.allowed_chars:
+                    return True # Игнорируем недопустимый символ
+                
                 self.text = self.text[:self.cursor_pos] + ch + self.text[self.cursor_pos:]
                 self.cursor_pos += 1
                 self._cursor_timer = 0
@@ -176,4 +184,6 @@ class TextInput:
                 pygame.draw.line(surface, COLOR_TEXT,
                                (cx, self.rect.y + 4),
                                (cx, self.rect.bottom - 4), 1)
+                
+                
                 
