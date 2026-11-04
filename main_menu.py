@@ -16,7 +16,7 @@ import pygame
 
 import map_generator
 import visualizer
-from ui_windows import TextInput, _vgrad_rect
+from ui import TextInput, _vgrad_rect
 
 WINDOWED_SIZE = (1280, 720)
 MAP_SIZE = 100

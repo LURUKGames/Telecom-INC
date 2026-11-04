@@ -13,7 +13,7 @@ import math
 
 import pygame
 
-from ui_windows import UIWindowManager
+from ui import UIWindowManager
 from camera import Camera
 from pathfinding import (
     find_datacenter,
