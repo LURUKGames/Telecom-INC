@@ -19,8 +19,8 @@ from ui.config_window import (
 )
 from ui.datacenter import DatacenterWindow, DCTariffWindow
 from ui.port_select import PortSelectWindow
-from ui.chassis import ChassisMergeWindow, ChassisGroupSettingsWindow
 from ui.manager import UIWindowManager
+from ui.chassis import port_name, board_of_port, boards_summary
 
 __all__ = [
     "TextInput", "speed_label", "_vgrad_rect", "_screen_size",
@@ -32,6 +32,6 @@ __all__ = [
     "LACPInputWindow",
     "SwitchConfigWindow", "RouterConfigWindow", "UniversalConfigWindow",
     "DatacenterWindow", "DCTariffWindow", "PortSelectWindow",
-    "ChassisMergeWindow", "ChassisGroupSettingsWindow",
     "UIWindowManager",
+    "port_name", "board_of_port", "boards_summary",
 ]

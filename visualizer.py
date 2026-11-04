@@ -91,8 +91,6 @@ class Game:
         self.equipment_at = {}
         self._next_equipment_id = 1
         self._next_cable_id = 1
-        self.chassis_groups = []
-        self._next_chassis_id = 1
 
         self.ui_manager = None
 
@@ -135,21 +133,220 @@ class Game:
                 return e
         return None
 
+    def visible_devices_at(self, loc):
+        """Устройства в локации, кроме поглощённых (is_merged_into)."""
+        return [d for d in self.equipment_at.get(loc, [])
+                if not d.get("is_merged_into")]
+
     def recompute_mismatch(self):
         recompute_speed_mismatch(self)
 
-    # ---- шасси (логическое оборудование) ----
-    def chassis_of(self, equip_id):
-        for grp in self.chassis_groups:
-            if equip_id in grp["boards"]:
-                return grp
+    # ---- заглушки для совместимости (до ЧАСТИ 3) ----
+    def chassis_of(self, _eid):
         return None
 
-    def equipment_in_chassis(self, chassis_id):
-        for grp in self.chassis_groups:
-            if grp["id"] == chassis_id:
-                return [self.equipment_by_id(eid) for eid in grp["boards"]]
+    def equipment_in_chassis(self, _cid):
         return []
+
+    # ==================================================================
+    # MERGE / UNMERGE
+    # ==================================================================
+    def _next_board_id(self, equip):
+        return max((b["board_id"] for b in equip["boards"]), default=0) + 1
+
+    def _retarget_cables(self, from_id, to_id, offset):
+        for cable in self.cables:
+            if cable["a"] == from_id:
+                cable["a"] = to_id
+                cable["port_a"] += offset
+            if cable.get("b") == from_id:
+                cable["b"] = to_id
+                cable["port_b"] += offset
+
+    def _shift_cables(self, equip_id, start, delta):
+        for cable in self.cables:
+            if cable["a"] == equip_id and cable["port_a"] >= start:
+                cable["port_a"] += delta
+            if (cable.get("b") == equip_id
+                    and cable.get("port_b") is not None
+                    and cable["port_b"] >= start):
+                cable["port_b"] += delta
+
+    def merge_equipment(self, host, other):
+        if host is other:
+            print("Merge: нельзя объединить с самим собой")
+            return False
+        if host["type"] != other["type"]:
+            print("Merge: типы устройств не совпадают")
+            return False
+        if other.get("is_merged_into"):
+            print("Merge: устройство уже объединено")
+            return False
+        if host.get("is_merged_into"):
+            print("Merge: нельзя присоединять к поглощённому")
+            return False
+        if (host["x"], host["y"]) != (other["x"], other["y"]):
+            print("Merge: устройства в разных локациях")
+            return False
+
+        offset = len(host["ports"])
+        n = len(other["ports"])
+
+        host["ports"].extend(other["ports"])
+
+        host.setdefault("lacp_groups", [])
+        next_lacp_id = max((g["id"] for g in host["lacp_groups"]), default=0) + 1
+        for grp in other.get("lacp_groups", []):
+            new_grp = dict(grp)
+            new_grp["id"] = next_lacp_id
+            new_grp["name"] = f"LACP-{next_lacp_id}"
+            new_grp["ports"] = [p + offset for p in grp["ports"]]
+            host["lacp_groups"].append(new_grp)
+            next_lacp_id += 1
+
+        new_bid = self._next_board_id(host)
+        host["boards"].append({"board_id": new_bid,
+                               "port_range": (offset, offset + n)})
+
+        self._retarget_cables(other["id"], host["id"], offset)
+
+        other["is_merged_into"] = host["id"]
+        other["merged_offset"] = offset
+        other["merged_board_id"] = new_bid
+
+        if (self.first_connection_point is not None and
+                self.first_connection_point["equipment"] is other):
+            self.first_connection_point = {
+                "equipment": host,
+                "port": self.first_connection_point["port"] + offset,
+            }
+
+        self.recompute_mismatch()
+        print(f"Merge: #{other['id']} поглощён #{host['id']} "
+              f"как плата {new_bid} (портов +{n})")
+        return True
+
+    def can_unmerge(self, host, board_id):
+        board = next((b for b in host["boards"]
+                      if b["board_id"] == board_id), None)
+        if board is None:
+            return False, []
+        start, end = board["port_range"]
+        mixed = []
+        for grp in host.get("lacp_groups", []):
+            inside = [p for p in grp["ports"] if start <= p < end]
+            outside = [p for p in grp["ports"] if not (start <= p < end)]
+            if inside and outside:
+                mixed.append(grp["name"])
+        return True, mixed
+
+    def unmerge_equipment(self, host, board_id, force=False):
+        board = next((b for b in host["boards"]
+                      if b["board_id"] == board_id), None)
+        if board is None:
+            print(f"Unmerge: плата {board_id} не найдена")
+            return False
+        if board is host["boards"][0]:
+            print("Unmerge: нельзя отсоединить базовую плату 1")
+            return False
+
+        ok, mixed = self.can_unmerge(host, board_id)
+        if mixed and not force:
+            print(f"Unmerge: LACP будет сломан ({', '.join(mixed)}). "
+                  f"Повторите с подтверждением.")
+            return False
+
+        start, end = board["port_range"]
+        n = end - start
+
+        other = None
+        for d in self.equipment:
+            if (d.get("is_merged_into") == host["id"]
+                    and d.get("merged_board_id") == board_id):
+                other = d
+                break
+        if other is None:
+            print(f"Unmerge: не найдено скрытое устройство для платы {board_id}")
+            return False
+        other_id = other["id"]
+
+        # Разбор LACP
+        new_host_lacp = []
+        other_lacp = []
+        next_other_id = 1
+        for grp in host.get("lacp_groups", []):
+            inside = [p for p in grp["ports"] if start <= p < end]
+            outside = [p for p in grp["ports"] if not (start <= p < end)]
+            if inside and outside:
+                continue   # смешанные удаляются
+            if inside and not outside:
+                new_grp = dict(grp)
+                new_grp["id"] = next_other_id
+                new_grp["name"] = f"LACP-{next_other_id}"
+                new_grp["ports"] = [p - start for p in inside]
+                other_lacp.append(new_grp)
+                next_other_id += 1
+            else:
+                new_host_lacp.append(grp)
+        host["lacp_groups"] = new_host_lacp
+        other["lacp_groups"] = other_lacp
+
+        # Кабели платы -> на other
+        for cable in self.cables:
+            if cable["a"] == host["id"] and start <= cable["port_a"] < end:
+                cable["a"] = other_id
+                cable["port_a"] -= start
+            if (cable.get("b") == host["id"]
+                    and cable.get("port_b") is not None
+                    and start <= cable["port_b"] < end):
+                cable["b"] = other_id
+                cable["port_b"] -= start
+
+        # Срез портов
+        other["ports"] = host["ports"][start:end]
+        del host["ports"][start:end]
+
+        # Сдвиг плат, идущих после
+        new_boards = []
+        for b in host["boards"]:
+            if b["board_id"] == board_id:
+                continue
+            bs, be = b["port_range"]
+            if bs >= end:
+                new_boards.append({"board_id": b["board_id"],
+                                   "port_range": (bs - n, be - n)})
+            else:
+                new_boards.append(b)
+        host["boards"] = new_boards
+
+        # Сдвиг индексов в LACP host'а
+        for grp in host["lacp_groups"]:
+            grp["ports"] = [p - n if p >= end else p for p in grp["ports"]]
+
+        # Сдвиг кабелей host'а после end
+        self._shift_cables(host["id"], end, -n)
+
+        # Снимаем флаги
+        other.pop("is_merged_into", None)
+        other.pop("merged_offset", None)
+        other.pop("merged_board_id", None)
+
+        # Курсор прокладки
+        if self.first_connection_point is not None:
+            fcp = self.first_connection_point
+            if fcp["equipment"] is host:
+                if start <= fcp["port"] < end:
+                    self.first_connection_point = None
+                elif fcp["port"] >= end:
+                    self.first_connection_point = {
+                        "equipment": host,
+                        "port": fcp["port"] - n,
+                    }
+
+        self.recompute_mismatch()
+        print(f"Unmerge: плата {board_id} отсоединена от #{host['id']} "
+              f"→ #{other_id} (возвращено портов {n})")
+        return True
 
     # ---- выбор инструмента / отмена ----
     def select_tool(self, tool):
@@ -209,7 +406,7 @@ class Game:
             self.ui_manager.open_house(house)
             return
         loc = self.equipment_location(tx, ty)
-        devices = self.equipment_at.get(loc, []) if loc is not None else []
+        devices = self.visible_devices_at(loc) if loc is not None else []
         if devices:
             switches = [d for d in devices if d["type"] in ("switch_12", "switch_24")]
             routers = [d for d in devices if d["type"] == "router"]
@@ -229,7 +426,7 @@ class Game:
             return False
 
         loc = self.equipment_location(tx, ty)
-        if not in_house and self.equipment_at.get(loc):
+        if not in_house and self.visible_devices_at(loc):
             print("Ошибка: на этом столбе уже стоит оборудование")
             return False
 
@@ -238,12 +435,14 @@ class Game:
             return False
 
         self.budget -= tool["cost"]
+        n_ports = tool["ports"]
         obj = {
             "id": self._next_equipment_id,
             "type": tool["type"],
             "x": loc[0], "y": loc[1],
-            "ports": make_ports(tool["ports"]),
+            "ports": make_ports(n_ports),
             "lacp_groups": [],
+            "boards": [{"board_id": 1, "port_range": (0, n_ports)}],
         }
         self._next_equipment_id += 1
         self.equipment.append(obj)
@@ -260,14 +459,15 @@ class Game:
         target = self.equipment_location(tx, ty)
         if target is None:
             target = (tx, ty)
-        points, length, found = find_route_via_power_graph(a_loc, target, self.power_lines)
+        points, length, found = find_route_via_power_graph(
+            a_loc, target, self.power_lines)
         return {"points": points, "length": length, "found_route": found,
                 "signal_ok": length <= MAX_CABLE_TILES}
 
     def connect_click(self, tool, tx, ty):
         loc = self.equipment_location(tx, ty)
         dc = find_datacenter(self.datacenters, tx, ty)
-        devices = self.equipment_at.get(loc, []) if loc is not None else []
+        devices = self.visible_devices_at(loc) if loc is not None else []
 
         if dc is not None and not devices:
             if self.first_connection_point is None:
@@ -296,9 +496,11 @@ class Game:
                 return False
 
             def on_first_port(device, port_index):
-                self.first_connection_point = {"equipment": device, "port": port_index}
+                self.first_connection_point = {"equipment": device,
+                                               "port": port_index}
                 info = EQUIP_INFO[device["type"]]
-                print(f"Выбран порт {port_index + 1} на {info['prep']} #{device['id']}")
+                print(f"Выбран порт {port_index + 1} на {info['prep']} "
+                      f"#{device['id']}")
 
             self.ui_manager.open_port_selection(avail, False, on_first_port)
             return True
@@ -335,7 +537,8 @@ class Game:
             self._finish_cable_to_dc(tool, router, port_a, dc, dc_loc,
                                      speed, name, ips)
 
-        print(f"Выбор тарифа: Роутер #{router['id']} -> ЦОД '{dc.get('name', 'DC')}'"
+        print(f"Выбор тарифа: Роутер #{router['id']} -> ЦОД "
+              f"'{dc.get('name', 'DC')}'"
               f"{' (есть активный тариф)' if existing else ''}")
         self.ui_manager.open_dc_tariff_selection(on_tariff_chosen,
                                                  existing_tariff=existing)
@@ -369,13 +572,9 @@ class Game:
         self.budget -= cost
         router["ports"][port_a]["free"] = False
         router["ports"][port_a]["connection"] = {
-            "to_dc": True,
-            "dc_id": dc.get("id"),
-            "dc_name": dc.get("name", "DC"),
-            "tariff": tariff_name,
-            "to_id": None,
-            "to_port": None,
-        }
+            "to_dc": True, "dc_id": dc.get("id"),
+            "dc_name": dc.get("name", "DC"), "tariff": tariff_name,
+            "to_id": None, "to_port": None,}
         router["ports"][port_a]["label"] = "Магистраль"
 
         cable = {
@@ -399,8 +598,9 @@ class Game:
 
         status = "OK" if signal_ok else "СИГНАЛ ПОТЕРЯН"
         print(f"Проложена МАГИСТРАЛЬ к ЦОД '{dc.get('name', 'DC')}': "
-              f"Роутер #{router['id']} (порт {port_a + 1}), тариф '{tariff_name}' "
-              f"({speed} Мбит, {ips} IP), {length} тайл., {cost} монет, {status}")
+              f"Роутер #{router['id']} (порт {port_a + 1}), тариф "
+              f"'{tariff_name}' ({speed} Мбит, {ips} IP), "
+              f"{length} тайл., {cost} монет, {status}")
         return True
 
     def _finish_cable(self, tool, a, port_a, b, port_b):
@@ -466,9 +666,12 @@ class Game:
             status = "SPEED MISMATCH (Link Down)"
         elif not signal_ok:
             status = "СИГНАЛ ПОТЕРЯН"
-        print(f"Проложен {tool['name']}: {EQUIP_INFO[a['type']]['name']} #{a['id']} "
-              f"(порт {port_a + 1}) - {EQUIP_INFO[b['type']]['name']} #{b['id']} "
-              f"(порт {port_b + 1}), {length} тайл., {cost} монет, {status}")
+        print(f"Проложен {tool['name']}: "
+              f"{EQUIP_INFO[a['type']]['name']} #{a['id']} "
+              f"(порт {port_a + 1}) - "
+              f"{EQUIP_INFO[b['type']]['name']} #{b['id']} "
+              f"(порт {port_b + 1}), "
+              f"{length} тайл., {cost} монет, {status}")
         self.first_connection_point = None
         return True
 

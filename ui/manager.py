@@ -10,21 +10,19 @@ from ui.config_window import (
 )
 from ui.datacenter import DatacenterWindow, DCTariffWindow
 from ui.port_select import PortSelectWindow
-from ui.chassis import ChassisMergeWindow, ChassisGroupSettingsWindow
 
 
 class UIWindowManager:
     def __init__(self, game):
         self.game = game
         self.active_window = None
-        self.window_stack = []       # предыдущие окна (нижний = самый старый)
+        self.window_stack = []
 
     def _screen_size(self):
         surf = pygame.display.get_surface()
         return surf.get_width(), surf.get_height()
 
     def _set_active(self, win, push=True):
-        """Ставит win активным. Если push=True и было активное — пушит старое в стек."""
         if win is None:
             return
         win.manager = self
@@ -33,7 +31,6 @@ class UIWindowManager:
         self.active_window = win
 
     def go_back(self):
-        """Возврат к предыдущему окну. Пусто — закрыть."""
         if self.active_window is not None:
             self.active_window.is_closed = True
         if self.window_stack:
@@ -44,13 +41,12 @@ class UIWindowManager:
             self.active_window = None
 
     def close_all(self):
-        """Полный close — чистим стек."""
         if self.active_window is not None:
             self.active_window.is_closed = True
         self.active_window = None
         self.window_stack.clear()
 
-    # ---- открытие окон (всё через _set_active) ----
+    # ---- открытие окон ----
     def open_house(self, house):
         if house is None:
             return
@@ -101,18 +97,8 @@ class UIWindowManager:
         self._set_active(PortSelectWindow(devices_list, is_second_click,
                                           callback, sw, sh, game=self.game))
 
-    def open_chassis_merge(self, base_equip):
-        sw, sh = self._screen_size()
-        self._set_active(ChassisMergeWindow(base_equip, sw, sh,
-                                            game=self.game, manager=self))
-
-    def open_chassis_settings(self, grp):
-        sw, sh = self._screen_size()
-        self._set_active(ChassisGroupSettingsWindow(grp, sw, sh, game=self.game))
-
-    # ---- совместимость со старым API ----
+    # ---- старое API ----
     def close_active(self):
-        """Старое API: закрывает активное, НЕ трогая стек."""
         if self.active_window is not None:
             self.active_window.close()
             self.active_window = None
@@ -133,7 +119,6 @@ class UIWindowManager:
         if self.active_window is None:
             return False
         if self.active_window.is_closed:
-            # активное уже закрыто вручную (минуя менеджер) — чистим
             if self.window_stack:
                 prev = self.window_stack.pop()
                 prev.is_closed = False
@@ -146,8 +131,7 @@ class UIWindowManager:
 
         if event.type == pygame.MOUSEMOTION and (
                 win.dragging or win.resizing or win.scroll_dragging):
-            handled = win.handle_event(event)
-            return handled
+            return win.handle_event(event)
 
         if event.type == pygame.MOUSEWHEEL:
             mouse = pygame.mouse.get_pos()
@@ -157,7 +141,6 @@ class UIWindowManager:
             return False
 
         handled = win.handle_event(event)
-        # Если окно само себя закрыло (не через manager) — сворачиваем стек
         if self.active_window is win and win.is_closed:
             if self.window_stack:
                 prev = self.window_stack.pop()
@@ -170,4 +153,5 @@ class UIWindowManager:
     def draw(self, screen, font, small_font):
         if self.active_window is not None and not self.active_window.is_closed:
             self.active_window.draw(screen, font, small_font)
+            
             
