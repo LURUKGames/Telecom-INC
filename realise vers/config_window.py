@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """ui/config_window.py - окна конфигурации: Switch/Router (карта) и Universal (дом)."""
 
+from ui.chassis import port_name, board_of_port, boards_summary
+
 import pygame
 
 from config import (
@@ -19,7 +21,7 @@ from ui.net_helpers import (
     equip_type_label, port_status_text_color, _notify_speed_changed,
     find_cable_for_port,
 )
-from ui.lacp import LACPInputWindow
+from ui.config.lacp import LACPInputWindow
 from ui.chassis import port_name, board_of_port
 
 
@@ -328,191 +330,110 @@ VLAN_BOX_SIZE = 200
 
 
 class VlanPopupWindow(Window):
-    """
-    Всплывающее окно настройки VLAN для порта или LACP-группы.
-    callback(vlan_string) вызывается при "Применить".
-    """
-
     def __init__(self, screen_w, screen_h, current_text, mode, callback):
-        w, h = 360, 340
+        w, h = 380, 340
         x = (screen_w - w) // 2
         y = (screen_h - h) // 2
         super().__init__(x, y, w, h, "Настройка VLAN")
         self.mode = mode
         self.callback = callback
         self.resizable = False
-        # Многострочный текст — храним как список строк
-        self.lines = (current_text or "").split("\n")
-        if not self.lines:
-            self.lines = [""]
-        self.cursor_line = len(self.lines) - 1
-        self.cursor_col = len(self.lines[-1])
-        self._cursor_timer = 0
-        self._apply_btn = pygame.Rect(0, 0, 0, 0)
-        self._cancel_btn = pygame.Rect(0, 0, 0, 0)
-        self._text_rect = pygame.Rect(0, 0, 0, 0)
+        self.error_msg = ""
+        self._error_timer = 0
+        
+        if mode == "access":
+            allowed = "0123456789"
+            self._hint = "Access: одно число 1-4092"
+        else:
+            allowed = "0123456789,-"
+            self._hint = "Trunk: числа и диапазоны 1-4092"
+            
+        self.vlan_input = TextInput((self.x + 30, self.y + 80, self.width - 60, 30),
+                                    initial_text=current_text, max_length=50, allowed_chars=allowed)
+        self._apply_btn = pygame.Rect(self.x + 20, self.y + self.height - 44, 140, 32)
+        self._cancel_btn = pygame.Rect(self.x + self.width - 160, self.y + self.height - 44, 140, 32)
         self._font = pygame.font.SysFont("arial,dejavusans", 14)
-        self._hint_font = pygame.font.SysFont("arial,dejavusans", 12)
-        self._focused = True
 
     def is_text_input_active(self):
-        return self._focused
+        return self.vlan_input.active
 
-    def _layout(self):
-        self._text_rect = pygame.Rect(self.x + (self.width - VLAN_BOX_SIZE) // 2,
-                                      self.y + HEADER_H + 44,
-                                      VLAN_BOX_SIZE, VLAN_BOX_SIZE)
-        by = self.y + self.height - 44
-        self._apply_btn = pygame.Rect(self.x + 20, by, 140, 32)
-        self._cancel_btn = pygame.Rect(self.x + self.width - 160, by, 140, 32)
-
-    def _insert_char(self, ch):
-        line = self.lines[self.cursor_line]
-        self.lines[self.cursor_line] = (line[:self.cursor_col]
-                                        + ch + line[self.cursor_col:])
-        self.cursor_col += 1
-
-    def _backspace(self):
-        if self.cursor_col > 0:
-            line = self.lines[self.cursor_line]
-            self.lines[self.cursor_line] = (line[:self.cursor_col - 1]
-                                            + line[self.cursor_col:])
-            self.cursor_col -= 1
-        elif self.cursor_line > 0:
-            prev_len = len(self.lines[self.cursor_line - 1])
-            self.lines[self.cursor_line - 1] += self.lines[self.cursor_line]
-            del self.lines[self.cursor_line]
-            self.cursor_line -= 1
-            self.cursor_col = prev_len
-
-    def _newline(self):
-        line = self.lines[self.cursor_line]
-        left = line[:self.cursor_col]
-        right = line[self.cursor_col:]
-        self.lines[self.cursor_line] = left
-        self.lines.insert(self.cursor_line + 1, right)
-        self.cursor_line += 1
-        self.cursor_col = 0
-
-    def _get_text(self):
-        return "\n".join(self.lines)
+    def _validate(self, text):
+        text = text.strip()
+        if not text:
+            return True
+        if self.mode == "access":
+            if "," in text or "-" in text:
+                return False
+            try:
+                n = int(text)
+                return 1 <= n <= 4092
+            except ValueError:
+                return False
+        else:
+            for part in text.split(","):
+                part = part.strip()
+                if not part:
+                    continue
+                if "-" in part:
+                    try:
+                        a, b = part.split("-")
+                        a, b = int(a.strip()), int(b.strip())
+                        if not (1 <= a <= 4092 and 1 <= b <= 4092 and a <= b):
+                            return False
+                    except ValueError:
+                        return False
+                else:
+                    try:
+                        n = int(part)
+                        if not (1 <= n <= 4092):
+                            return False
+                    except ValueError:
+                        return False
+            return True
 
     def _apply(self):
-        text = self._get_text().strip()
+        text = self.vlan_input.text.strip()
+        if not self._validate(text):
+            self.error_msg = f"Ошибка! {self._hint}"
+            self._error_timer = 180
+            return
         cb = self.callback
         self.close()
         cb(text)
 
     def handle_event(self, event):
-        self._layout()
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_ESCAPE:
                 self.close()
                 return True
             if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
-                if pygame.key.get_mods() & pygame.KMOD_SHIFT:
-                    self._newline()
-                else:
-                    self._apply()
+                self._apply()
                 return True
-            if event.key == pygame.K_BACKSPACE:
-                self._backspace()
-                self._cursor_timer = 0
-                return True
-            if event.key == pygame.K_LEFT:
-                if self.cursor_col > 0:
-                    self.cursor_col -= 1
-                elif self.cursor_line > 0:
-                    self.cursor_line -= 1
-                    self.cursor_col = len(self.lines[self.cursor_line])
-                self._cursor_timer = 0
-                return True
-            if event.key == pygame.K_RIGHT:
-                if self.cursor_col < len(self.lines[self.cursor_line]):
-                    self.cursor_col += 1
-                elif self.cursor_line < len(self.lines) - 1:
-                    self.cursor_line += 1
-                    self.cursor_col = 0
-                self._cursor_timer = 0
-                return True
-            if event.key == pygame.K_UP and self.cursor_line > 0:
-                self.cursor_line -= 1
-                self.cursor_col = min(self.cursor_col, len(self.lines[self.cursor_line]))
-                self._cursor_timer = 0
-                return True
-            if event.key == pygame.K_DOWN and self.cursor_line < len(self.lines) - 1:
-                self.cursor_line += 1
-                self.cursor_col = min(self.cursor_col, len(self.lines[self.cursor_line]))
-                self._cursor_timer = 0
-                return True
-            ch = event.unicode
-            if ch and ch.isprintable():
-                self._insert_char(ch)
-                self._cursor_timer = 0
-            return True
+            return self.vlan_input.handle_event(event, self._font)
 
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if self._apply_btn.collidepoint(event.pos):
-                self._apply()
-                return True
+                self._apply(); return True
             if self._cancel_btn.collidepoint(event.pos):
-                self.close()
-                return True
-            if self.close_rect().collidepoint(event.pos):
-                self.close()
-                return True
-            if self.back_rect().collidepoint(event.pos):
-                self.close()
-                return True
-            if self.titlebar_rect().collidepoint(event.pos):
-                self.dragging = True
-                self.drag_offset_x = event.pos[0] - self.x
-                self.drag_offset_y = event.pos[1] - self.y
-                return True
-            if self._text_rect.collidepoint(event.pos):
+                self.close(); return True
+            if self.vlan_input.handle_event(event, self._font):
                 return True
             if self.contains(event.pos):
                 return True
-            self.close()
-            return True
-
+            self.close(); return True
         return super().handle_event(event)
 
     def draw(self, screen, font, small_font):
         self._draw_frame(screen, font)
-        self._layout()
-
-        if self.mode == "access":
-            hint = "Access: один VLAN (1-4092)"
-        else:
-            hint = "Пример: 1-4092 или 1,2,3,4,20,30,2500"
-        hs = self._hint_font.render(hint, True, COLOR_TEXT_DIM)
+        hs = self._font.render(self._hint, True, COLOR_TEXT_DIM)
         screen.blit(hs, (self.x + 30, self.y + HEADER_H + 10))
-        ms = self._hint_font.render(f"Режим: {self.mode}", True, COLOR_TEXT_DIM)
-        screen.blit(ms, (self.x + 30, self.y + HEADER_H + 26))
-
-        pygame.draw.rect(screen, (30, 30, 34), self._text_rect, border_radius=6)
-        pygame.draw.rect(screen, (120, 160, 200), self._text_rect, 2, border_radius=6)
-
-        old_clip = screen.get_clip()
-        screen.set_clip(self._text_rect)
-        line_h = self._font.get_height() + 2
-        for idx, line in enumerate(self.lines):
-            ls = self._font.render(line, True, COLOR_TEXT)
-            screen.blit(ls, (self._text_rect.x + 6,
-                             self._text_rect.y + 6 + idx * line_h))
-        self._cursor_timer = (self._cursor_timer + 1) % 60
-        if self._cursor_timer < 30:
-            cur_line_text = self.lines[self.cursor_line][:self.cursor_col]
-            cx = self._text_rect.x + 6 + self._font.size(cur_line_text)[0]
-            cy = self._text_rect.y + 6 + self.cursor_line * line_h
-            pygame.draw.line(screen, COLOR_TEXT,
-                             (cx, cy), (cx, cy + line_h - 2), 1)
-        screen.set_clip(old_clip)
-
+        if self._error_timer > 0:
+            self._error_timer -= 1
+            err = self._font.render(self.error_msg, True, (255, 80, 80))
+            screen.blit(err, (self.x + 30, self.y + HEADER_H + 50))
+        self.vlan_input.draw(screen, self._font)
         draw_button_screen(screen, small_font, self._apply_btn, "✔ Применить")
         draw_button_screen(screen, small_font, self._cancel_btn, "Отмена")
-
 
 # ============================================================================
 # UniversalConfigWindow — главное окно конфигурации дома.

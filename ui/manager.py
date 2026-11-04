@@ -3,13 +3,12 @@
 
 import pygame
 
-from ui.house import HouseWindow
-from ui.device import SwitchWindow, RouterWindow
-from ui.config_window import (
-    SwitchConfigWindow, RouterConfigWindow, UniversalConfigWindow,
-)
-from ui.datacenter import DatacenterWindow, DCTariffWindow
-from ui.port_select import PortSelectWindow
+from ui.windows.house import HouseWindow
+from ui.windows.device import SwitchWindow, RouterWindow
+from ui.config.universal_config import UniversalConfigWindow
+from ui.config.device_config import SwitchConfigWindow, RouterConfigWindow
+from ui.windows.datacenter import DatacenterWindow, DCTariffWindow
+from ui.windows.port_select import PortSelectWindow
 
 
 class UIWindowManager:
