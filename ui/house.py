@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ui/house.py - окно дома. Клик по "Оборудование" открывает UniversalConfigWindow."""
+"""ui/house.py - окно дома. Кнопка "Оборудование" открывает UCW."""
 
 import pygame
 
@@ -28,7 +28,9 @@ class HouseWindow(Window):
     def _house_devices(self):
         if self.game is None:
             return []
-        return self.game.equipment_at.get(self._house_loc(), [])
+        # ВАЖНО: отфильтровать поглощённые при Merge
+        return [d for d in self.game.equipment_at.get(self._house_loc(), [])
+                if not d.get("is_merged_into")]
 
     def handle_event(self, event):
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
@@ -44,7 +46,8 @@ class HouseWindow(Window):
         if not devices:
             print(f"В доме #{self.house['id']} нет оборудования")
             return
-        self.close()
+        # КРИТИЧЕСКИЙ ФИКС: НЕ вызываем self.close()!
+        # Менеджер сам положит HouseWindow в стек, чтобы "Назад" работал.
         self.game.ui_manager.open_universal_config(devices)
 
     def draw(self, screen, font, small_font):

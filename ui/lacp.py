@@ -75,7 +75,10 @@ class LACPInputWindow(Window):
                 self.close()
                 return True
             if self.back_rect().collidepoint(event.pos):
-                self.close()
+                if self.manager is not None:
+                    self.manager.go_back()
+                else:
+                    self.close()
                 return True
             if self._ok_btn.collidepoint(event.pos):
                 self._submit()

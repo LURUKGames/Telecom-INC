@@ -888,24 +888,41 @@ class UniversalConfigWindow(Window):
         self._build_inputs()
         self._compute_content_height()
 
-    def _apply_setting_group(self, speed):
-        """Setting Group: скорость на активную секцию (или на все, если не выбрана)."""
-        targets = []
-        if self.active_section_eid is not None:
+        def _open_setting_group(self):
+            """Открывает окно групповых настроек (скорость + VLAN)."""
             eq = self._find_equip(self.active_section_eid)
-            if eq is not None:
-                targets = [eq]
-        if not targets:
-            targets = self.devices
-        for eq in targets:
-            for i, port in enumerate(eq["ports"]):
-                if port_in_lacp(eq, i) is not None:
-                    continue
-                if _find_cable_100(self.game, eq["id"], i):
-                    continue
-                port["speed"] = speed
-        _notify_speed_changed(self.game)
-        print(f"Setting Group: {len(targets)} устройство(а) → {speed}М")
+            if eq is None and self.devices:
+                eq = self.devices[0]
+                self.active_section_eid = eq["id"]
+            if eq is None:
+                print("Setting Group: нет активных устройств")
+                return
+            sw, sh = _screen_size()
+
+            def apply(scope, speed, vlan):
+                if scope == "all":
+                    targets = list(self.devices)
+                else:
+                    active = self._find_equip(self.active_section_eid)
+                    targets = [active] if active else []
+                count = 0
+                for target in targets:
+                    for i, port in enumerate(target["ports"]):
+                        if port_in_lacp(target, i) is not None:
+                            continue
+                        if speed is not None:
+                            if _find_cable_100(self.game, target["id"], i):
+                                continue
+                            port["speed"] = speed
+                        if vlan:
+                            port["vlan_string"] = vlan
+                        count += 1
+                _notify_speed_changed(self.game)
+                print(f"Setting Group: {count} портов (speed={speed}, vlan='{vlan}', scope={scope})")
+
+                self.popup = GroupSettingsWindow(sw, sh, self.game, apply)
+                if self.manager is not None:
+                    self.popup.manager = self.manager
 # ---- события ----
     def _toggle_admin_state(self, obj):
         st = obj.get("admin_state", "up")
@@ -937,150 +954,125 @@ class UniversalConfigWindow(Window):
         self.popup = VlanPopupWindow(sw, sh, text, mode, cb)
         self.popup.manager = self.manager
 
-    def handle_event(self, event):
-        # Активный popup перехватывает всё
-        if self.popup is not None:
-            handled = self.popup.handle_event(event)
-            if self.popup is not None and self.popup.is_closed:
-                self.popup = None
-            return handled or True
+        def handle_event(self, event):
+            # Popup (VLAN / GroupSettings) перехватывает всё
+            if self.popup is not None:
+                handled = self.popup.handle_event(event)
+                if self.popup is not None and self.popup.is_closed:
+                    self.popup = None
+                return handled or True
 
-        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            if self._btn_save.collidepoint(event.pos):
-                self._save()
-                return True
-            if self._btn_lacp.collidepoint(event.pos):
-                if self.mode == self.MODE_LACP:
-                    self._confirm_lacp()
-                else:
-                    self._enter_mode(self.MODE_LACP)
-                return True
-            if self._btn_commut.collidepoint(event.pos):
-                if self.mode == self.MODE_COMMUT:
-                    self._confirm_commut()
-                else:
-                    self._enter_mode(self.MODE_COMMUT)
-                return True
-            if self._btn_setting.collidepoint(event.pos):
-                # Быстрый шорткат: тумблер 1G↔100M на активной секции
-                eq = self._find_equip(self.active_section_eid)
-                cur_speed = 1000
-                if eq is not None and eq["ports"]:
-                    cur_speed = eq["ports"][0].get("speed", 1000)
-                new_speed = 100 if cur_speed >= 1000 else 1000
-                self._apply_setting_group(new_speed)
-                return True
-            if self._btn_unmerge.collidepoint(event.pos):
-                self._do_unmerge()
-                return True
-
-        if event.type in (pygame.MOUSEBUTTONDOWN, pygame.KEYDOWN):
-            self._sync_positions()
-
+            # KEYDOWN -> активный TextInput
             if event.type == pygame.KEYDOWN:
                 for ti in self.inputs.values():
                     if ti.active:
                         return ti.handle_event(event, self._cfg_font)
-                return False
+                return super().handle_event(event)
 
-            if event.button == 1:
-                # базовые кнопки окна (back/close/titlebar/resize/scroll)
-                base_handled = super().handle_event(event)
-                if base_handled:
+            # Клики: СНАЧАЛА футер и контент, ПОТОМ базовое окно
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                # 1. Футер
+                if self._btn_save.collidepoint(event.pos):
+                    self._save(); return True
+                if self._btn_lacp.collidepoint(event.pos):
+                    if self.mode == self.MODE_LACP:
+                        self._confirm_lacp()
+                    else:
+                        self._enter_mode(self.MODE_LACP)
+                    return True
+                if self._btn_commut.collidepoint(event.pos):
+                    if self.mode == self.MODE_COMMUT:
+                        self._confirm_commut()
+                    else:
+                        self._enter_mode(self.MODE_COMMUT)
+                    return True
+                if self._btn_setting.collidepoint(event.pos):
+                    self._open_setting_group()
+                    return True
+                if self._btn_unmerge.collidepoint(event.pos):
+                    self._do_unmerge()
                     return True
 
-                # Клик по заголовку секции
-                for rect, equip in self._section_hits:
-                    if rect.collidepoint(event.pos):
-                        if self.mode == self.MODE_COMMUT:
-                            if equip["id"] in self.selected_devices:
-                                self.selected_devices.discard(equip["id"])
+                # 2. Контент (ЗАГОЛОВКИ, LINK, SPEED, MODE, VLAN, DESC)
+                self._sync_positions()
+                if self.content_rect().collidepoint(event.pos):
+                    # Заголовки секций
+                    for rect, equip in self._section_hits:
+                        if rect.collidepoint(event.pos):
+                            if self.mode == self.MODE_COMMUT:
+                                if equip["id"] in self.selected_devices:
+                                    self.selected_devices.discard(equip["id"])
+                                else:
+                                    self.selected_devices.add(equip["id"])
                             else:
-                                self.selected_devices.add(equip["id"])
-                        else:
-                            self.active_section_eid = equip["id"]
-                        return True
-
-                # Link overlay
-                for rect, equip, pi, kind, ref in self._link_hits:
-                    if not rect.collidepoint(event.pos):
-                        continue
-                    if self.mode == self.MODE_LACP and kind == "port":
-                        key = (equip["id"], pi)
-                        if key in self.selected_ports:
-                            self.selected_ports.remove(key)
-                        else:
-                            self.selected_ports.append(key)
-                        return True
-                    if kind == "port":
-                        self._toggle_admin_state(equip["ports"][pi])
-                    else:
-                        self._toggle_admin_state(ref)
-                    return True
-
-                # Speed
-                for rect, kind, equip, ref in self._speed_hits:
-                    if not rect.collidepoint(event.pos):
-                        continue
-                    if kind == "port":
-                        if port_in_lacp(equip, ref) is not None:
-                            return True  # заблокировано
-                        if _find_cable_100(self.game, equip["id"], ref):
-                            print("Кабель 100Мб ограничивает скорость")
+                                self.active_section_eid = equip["id"]
                             return True
-                        toggle_port_speed(self.game, equip, ref)
-                    else:
-                        toggle_lacp_speed(ref, self.game)
-                    return True
-
-                # Mode
-                for rect, kind, equip, ref in self._mode_hits:
-                    if not rect.collidepoint(event.pos):
-                        continue
-                    if kind == "port":
-                        if port_in_lacp(equip, ref) is not None:
+                    # Link-овалы (up/down/shut / выбор в LACP)
+                    for rect, equip, pi, kind, ref in self._link_hits:
+                        if rect.collidepoint(event.pos):
+                            if self.mode == self.MODE_LACP and kind == "port":
+                                key = (equip["id"], pi)
+                                if key in self.selected_ports:
+                                    self.selected_ports.remove(key)
+                                else:
+                                    self.selected_ports.append(key)
+                                return True
+                            if kind == "port":
+                                self._toggle_admin_state(equip["ports"][pi])
+                            else:
+                                self._toggle_admin_state(ref)
                             return True
-                        self._toggle_mode(equip["ports"][ref])
-                    else:
-                        self._toggle_mode(ref)
-                    return True
-
-                # VLAN
-                for rect, kind, equip, ref in self._vlan_hits:
-                    if not rect.collidepoint(event.pos):
-                        continue
-                    if kind == "port":
-                        if port_in_lacp(equip, ref) is not None:
+                    # Скорость
+                    for rect, kind, equip, ref in self._speed_hits:
+                        if rect.collidepoint(event.pos):
+                            if kind == "port":
+                                if port_in_lacp(equip, ref) is not None:
+                                    return True
+                                if _find_cable_100(self.game, equip["id"], ref):
+                                    print("Кабель 100Мб ограничивает скорость")
+                                    return True
+                                toggle_port_speed(self.game, equip, ref)
+                            else:
+                                toggle_lacp_speed(ref, self.game)
                             return True
-                        self._open_vlan_popup("port", equip, ref)
-                    else:
-                        self._open_vlan_popup("lacp", equip, ref)
-                    return True
-
-                # Описание (TextInput)
-                cr = self.content_rect()
-                if cr.collidepoint(event.pos):
+                    # Режим access/trunk
+                    for rect, kind, equip, ref in self._mode_hits:
+                        if rect.collidepoint(event.pos):
+                            if kind == "port":
+                                if port_in_lacp(equip, ref) is not None:
+                                    return True
+                                self._toggle_mode(equip["ports"][ref])
+                            else:
+                                self._toggle_mode(ref)
+                            return True
+                    # VLAN
+                    for rect, kind, equip, ref in self._vlan_hits:
+                        if rect.collidepoint(event.pos):
+                            if kind == "port":
+                                if port_in_lacp(equip, ref) is not None:
+                                    return True
+                                self._open_vlan_popup("port", equip, ref)
+                            else:
+                                self._open_vlan_popup("lacp", equip, ref)
+                            return True
+                    # Поля подписи
                     for key, rect in self._desc_rects.items():
-                        kind = key[0]
-                        eid = key[1]
+                        kind, eid = key[0], key[1]
                         equip = self._find_equip(eid)
                         if equip is None:
                             continue
-                        if kind == "port":
-                            pi = key[2]
-                            if port_in_lacp(equip, pi) is not None:
-                                continue
-                        ti = self.inputs.get(key)
-                        if ti is None:
+                        if kind == "port" and port_in_lacp(equip, key[2]) is not None:
                             continue
-                        if ti.handle_event(event, self._cfg_font):
+                        ti = self.inputs.get(key)
+                        if ti is not None and ti.handle_event(event, self._cfg_font):
                             return True
-                    # Клик внутри контента вне элементов — снять фокус
+                    # Клик по пустому месту — снять фокус
                     for ti in self.inputs.values():
                         ti.active = False
                     return True
 
-        return False
+            # 3. Всё остальное (drag, scroll, resize, back, close) — базовому классу
+            return super().handle_event(event)
 
     def _save(self):
         for key, ti in self.inputs.items():
@@ -1291,4 +1283,91 @@ class UniversalConfigWindow(Window):
 
         if self.popup is not None:
             self.popup.draw(screen, font, small_font)
-            
+
+
+class GroupSettingsWindow(Window):
+    """Простое окно групповых настроек: скорость + VLAN + область."""
+
+    def __init__(self, screen_w, screen_h, game, on_apply):
+        w, h = 420, 340
+        x = (screen_w - w) // 2
+        y = (screen_h - h) // 2
+        super().__init__(x, y, w, h, "Настройки группы")
+        self.game = game
+        self.on_apply = on_apply
+        self.scope = "active"
+        self.speed = 1000
+        self.resizable = False
+        self.vlan_input = TextInput((0, 0, 200, 26), initial_text="", max_length=40)
+        self._btns = {}
+        self._layout()
+
+    def _layout(self):
+        self._btns = {}
+        bw, bh = 100, 32
+        bx = self.x + 30
+        by = self.y + HEADER_H + 40
+        self._btns["spd100"] = pygame.Rect(bx, by, bw, bh)
+        self._btns["spd1g"] = pygame.Rect(bx + bw + 10, by, bw, bh)
+        self._btns["spd10g"] = pygame.Rect(bx + (bw + 10) * 2, by, bw, bh)
+
+        y2 = by + bh + 30
+        self._btns["scope_active"] = pygame.Rect(bx, y2, 170, bh)
+        self._btns["scope_all"] = pygame.Rect(bx + 180, y2, 170, bh)
+
+        y3 = y2 + bh + 30
+        self.vlan_input.set_rect((bx + 70, y3, 280, 26))
+
+        y4 = y3 + 50
+        self._btns["apply"] = pygame.Rect(self.x + self.width // 2 - 110, y4, 100, 32)
+        self._btns["cancel"] = pygame.Rect(self.x + self.width // 2 + 10, y4, 100, 32)
+
+    def is_text_input_active(self):
+        return self.vlan_input.active
+
+    def handle_event(self, event):
+        self._layout()
+        if event.type == pygame.KEYDOWN and self.vlan_input.active:
+            return self.vlan_input.handle_event(event)
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self._btns["spd100"].collidepoint(event.pos):
+                self.speed = 100; return True
+            if self._btns["spd1g"].collidepoint(event.pos):
+                self.speed = 1000; return True
+            if self._btns["spd10g"].collidepoint(event.pos):
+                self.speed = 10000; return True
+            if self._btns["scope_active"].collidepoint(event.pos):
+                self.scope = "active"; return True
+            if self._btns["scope_all"].collidepoint(event.pos):
+                self.scope = "all"; return True
+            if self._btns["apply"].collidepoint(event.pos):
+                self.on_apply(self.scope, self.speed, self.vlan_input.text.strip())
+                self.close(); return True
+            if self._btns["cancel"].collidepoint(event.pos):
+                self.close(); return True
+            if self.vlan_input.handle_event(event):
+                return True
+        return super().handle_event(event)
+
+    def draw(self, screen, font, small_font):
+        self._draw_frame(screen, font)
+        self._layout()
+        lbl = small_font.render("Скорость:", True, COLOR_TEXT)
+        screen.blit(lbl, (self.x + 30, self.y + HEADER_H + 14))
+        draw_button_screen(screen, small_font, self._btns["spd100"], "100M",
+                           active=(self.speed == 100))
+        draw_button_screen(screen, small_font, self._btns["spd1g"], "1G",
+                           active=(self.speed == 1000))
+        draw_button_screen(screen, small_font, self._btns["spd10g"], "10G",
+                           active=(self.speed == 10000))
+        lbl2 = small_font.render("Применить к:", True, COLOR_TEXT)
+        screen.blit(lbl2, (self.x + 30, self._btns["scope_active"].y - 20))
+        draw_button_screen(screen, small_font, self._btns["scope_active"],
+                           "Активная", active=(self.scope == "active"))
+        draw_button_screen(screen, small_font, self._btns["scope_all"],
+                           "Все секции", active=(self.scope == "all"))
+        lbl3 = small_font.render("VLAN:", True, COLOR_TEXT)
+        screen.blit(lbl3, (self.x + 30, self.vlan_input.rect.y + 4))
+        self.vlan_input.draw(screen, small_font)
+        draw_button_screen(screen, small_font, self._btns["apply"], "✔ Применить")
+        draw_button_screen(screen, small_font, self._btns["cancel"], "Отмена")
