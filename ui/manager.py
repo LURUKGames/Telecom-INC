@@ -3,7 +3,7 @@
 
 import pygame
 
-from ui.house import HouseWindow
+from ui.house import HouseWindow, EquipmentChoiceWindow
 from ui.device import SwitchWindow, RouterWindow
 from ui.config_window import SwitchConfigWindow, RouterConfigWindow
 from ui.datacenter import DatacenterWindow, DCTariffWindow
@@ -24,6 +24,12 @@ class UIWindowManager:
             return
         sw, sh = self._screen_size()
         self.active_window = HouseWindow(house, sw, sh, game=self.game)
+
+    def open_equipment_choice(self, devices, game):
+        if not devices:
+            return
+        sw, sh = self._screen_size()
+        self.active_window = EquipmentChoiceWindow(devices, sw, sh, game=game)
 
     def open_switch(self, equipment_list):
         if not equipment_list:
@@ -46,6 +52,12 @@ class UIWindowManager:
     def open_router_config(self, equip):
         sw, sh = self._screen_size()
         self.active_window = RouterConfigWindow(equip, sw, sh, game=self.game)
+    
+    def open_chassis_merge(self, base_equip):
+        sw, sh = self._screen_size()
+        from ui.chassis import ChassisMergeWindow
+        self.active_window = ChassisMergeWindow(base_equip, sw, sh,
+                                                game=self.game, manager=self)
 
     def open_datacenter(self, dc):
         sw, sh = self._screen_size()
@@ -61,7 +73,7 @@ class UIWindowManager:
             return
         sw, sh = self._screen_size()
         self.active_window = PortSelectWindow(devices_list, is_second_click,
-                                             callback, sw, sh)
+                                             callback, sw, sh, game=self.game)
 
     def close_active(self):
         if self.active_window is not None:
@@ -110,4 +122,5 @@ class UIWindowManager:
     def draw(self, screen, font, small_font):
         if self.active_window is not None and not self.active_window.is_closed:
             self.active_window.draw(screen, font, small_font)
+            
             

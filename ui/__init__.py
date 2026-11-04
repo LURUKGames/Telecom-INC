@@ -11,7 +11,7 @@ from ui.net_helpers import (
     lacp_effective_label,
 )
 from ui.base import Window
-from ui.house import HouseWindow
+from ui.house import HouseWindow, EquipmentChoiceWindow
 from ui.device import SwitchWindow, RouterWindow
 from ui.lacp import LACPInputWindow
 from ui.config_window import SwitchConfigWindow, RouterConfigWindow
@@ -25,8 +25,9 @@ __all__ = [
     "find_cable_for_port", "port_in_lacp", "toggle_port_speed",
     "toggle_lacp_speed", "equip_type_label", "port_status_text_color",
     "port_fill_color", "lacp_effective_label",
-    "Window", "HouseWindow", "SwitchWindow", "RouterWindow",
-    "LACPInputWindow", "SwitchConfigWindow", "RouterConfigWindow",
+    "Window", "HouseWindow", "EquipmentChoiceWindow",
+    "SwitchWindow", "RouterWindow", "LACPInputWindow",
+    "SwitchConfigWindow", "RouterConfigWindow",
     "DatacenterWindow", "DCTariffWindow", "PortSelectWindow",
     "UIWindowManager",
 ]

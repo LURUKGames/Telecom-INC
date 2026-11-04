@@ -91,6 +91,8 @@ class Game:
         self.equipment_at = {}
         self._next_equipment_id = 1
         self._next_cable_id = 1
+        self.chassis_groups = []
+        self._next_chassis_id = 1
 
         self.ui_manager = None
 
@@ -135,6 +137,19 @@ class Game:
 
     def recompute_mismatch(self):
         recompute_speed_mismatch(self)
+
+    # ---- шасси (логическое оборудование) ----
+    def chassis_of(self, equip_id):
+        for grp in self.chassis_groups:
+            if equip_id in grp["boards"]:
+                return grp
+        return None
+
+    def equipment_in_chassis(self, chassis_id):
+        for grp in self.chassis_groups:
+            if grp["id"] == chassis_id:
+                return [self.equipment_by_id(eid) for eid in grp["boards"]]
+        return []
 
     # ---- выбор инструмента / отмена ----
     def select_tool(self, tool):
@@ -235,7 +250,7 @@ class Game:
         self.equipment_at.setdefault(loc, []).append(obj)
         print(f"Установлен {tool['name']} (центр: {loc})")
         return True
-    
+
     # ---- прокладка кабеля ----
     def phantom_path(self, tx, ty):
         if self.first_connection_point is None:
@@ -254,7 +269,6 @@ class Game:
         dc = find_datacenter(self.datacenters, tx, ty)
         devices = self.equipment_at.get(loc, []) if loc is not None else []
 
-        # ---- КЛИК ПО ЦОД ----
         if dc is not None and not devices:
             if self.first_connection_point is None:
                 print("Ошибка: сначала выберите порт Роутера, затем кликните по ЦОД")
