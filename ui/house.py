@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ui/house.py - окно дома и выбора оборудования в доме."""
+"""ui/house.py - окно дома. Клик по "Оборудование" открывает UniversalConfigWindow."""
 
 import pygame
 
@@ -33,20 +33,19 @@ class HouseWindow(Window):
     def handle_event(self, event):
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if self._equip_btn.collidepoint(event.pos):
-                self._open_equipment_choice()
+                self._open_universal_config()
                 return True
         return super().handle_event(event)
 
-    def _open_equipment_choice(self):
+    def _open_universal_config(self):
         if self.game is None:
             return
-        loc = self._house_loc()
-        devices = self.game.equipment_at.get(loc, [])
+        devices = self._house_devices()
         if not devices:
             print(f"В доме #{self.house['id']} нет оборудования")
             return
         self.close()
-        self.game.ui_manager.open_equipment_choice(devices, self.game)
+        self.game.ui_manager.open_universal_config(devices)
 
     def draw(self, screen, font, small_font):
         self._draw_frame(screen, font)
@@ -75,56 +74,3 @@ class HouseWindow(Window):
             state = "hover" if self._equip_btn.collidepoint(mouse) else "normal"
             draw_fancy_button(screen, small_font, self._equip_btn,
                               "⚙ Оборудование", state=state)
-
-
-class EquipmentChoiceWindow(Window):
-    def __init__(self, devices, screen_w, screen_h, game=None):
-        w, h = 300, 250
-        x = (screen_w - w) // 2
-        y = (screen_h - h) // 2
-        super().__init__(x, y, w, h, "Выбор оборудования")
-        self.game = game
-        self.switches = [d for d in devices if d["type"] in ("switch_12", "switch_24")]
-        self.routers = [d for d in devices if d["type"] == "router"]
-        self._switch_btn = pygame.Rect(0, 0, 0, 0)
-        self._router_btn = pygame.Rect(0, 0, 0, 0)
-
-    def handle_event(self, event):
-        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            if self.switches and self._switch_btn.collidepoint(event.pos):
-                self.close()
-                if self.game is not None:
-                    self.game.ui_manager.open_switch(self.switches)
-                return True
-            if self.routers and self._router_btn.collidepoint(event.pos):
-                self.close()
-                if self.game is not None:
-                    self.game.ui_manager.open_router(self.routers)
-                return True
-        return super().handle_event(event)
-
-    def draw(self, screen, font, small_font):
-        self._draw_frame(screen, font)
-        mouse = pygame.mouse.get_pos()
-        bw, bh = 260, 48
-        bx = self.x + self.width // 2 - bw // 2
-        y = self.y + HEADER_H + 28
-
-        self._switch_btn = pygame.Rect(bx, y, bw, bh)
-        if self.switches:
-            sstate = "hover" if self._switch_btn.collidepoint(mouse) else "normal"
-        else:
-            sstate = "disabled"
-        draw_fancy_button(screen, small_font, self._switch_btn,
-                          f"Свитчи ({len(self.switches)})", state=sstate)
-
-        y += bh + 20
-        self._router_btn = pygame.Rect(bx, y, bw, bh)
-        if self.routers:
-            rstate = "hover" if self._router_btn.collidepoint(mouse) else "normal"
-        else:
-            rstate = "disabled"
-        draw_fancy_button(screen, small_font, self._router_btn,
-                          f"Роутеры ({len(self.routers)})", state=rstate)
-        
-        

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """ui - пакет оконного интерфейса Telecom INC. Реэкспорт публичного API."""
 
+
 from ui.widgets import (
     TextInput, speed_label, _vgrad_rect, _screen_size,
     draw_fancy_button, draw_button_on, draw_button_screen,
@@ -14,7 +15,7 @@ from ui.base import Window
 from ui.house import HouseWindow, EquipmentChoiceWindow
 from ui.device import SwitchWindow, RouterWindow
 from ui.lacp import LACPInputWindow
-from ui.config_window import SwitchConfigWindow, RouterConfigWindow
+from ui.config_window import SwitchConfigWindow, RouterConfigWindow, UniversalConfigWindow
 from ui.datacenter import DatacenterWindow, DCTariffWindow
 from ui.port_select import PortSelectWindow
 from ui.manager import UIWindowManager
@@ -29,5 +30,5 @@ __all__ = [
     "SwitchWindow", "RouterWindow", "LACPInputWindow",
     "SwitchConfigWindow", "RouterConfigWindow",
     "DatacenterWindow", "DCTariffWindow", "PortSelectWindow",
-    "UIWindowManager",
+    "UIWindowManager", "UniversalConfigWindow",
 ]

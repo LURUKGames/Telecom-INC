@@ -53,6 +53,13 @@ class UIWindowManager:
         sw, sh = self._screen_size()
         self.active_window = RouterConfigWindow(equip, sw, sh, game=self.game)
     
+    def open_universal_config(self, devices):
+        if not devices:
+            return
+        sw, sh = self._screen_size()
+        from ui.config_window import UniversalConfigWindow
+        self.active_window = UniversalConfigWindow(devices, sw, sh, game=self.game)
+    
     def open_chassis_merge(self, base_equip):
         sw, sh = self._screen_size()
         from ui.chassis import ChassisMergeWindow
