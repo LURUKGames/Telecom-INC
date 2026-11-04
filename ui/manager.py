@@ -9,9 +9,16 @@ from ui.windows.datacenter import DatacenterWindow, DCTariffWindow
 from ui.windows.port_select import PortSelectWindow
 from ui.config.universal_config import UniversalConfigWindow
 from ui.config.device_config import SwitchConfigWindow, RouterConfigWindow
+from ui.base import Window, MessageBox
+
 
 
 class UIWindowManager:
+    
+    def open_message_box(self, title, text):
+        sw, sh = self._screen_size()
+        self._set_active(MessageBox(title, text, sw, sh))
+    
     def __init__(self, game):
         self.game = game
         self.active_window = None

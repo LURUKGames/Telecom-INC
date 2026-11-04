@@ -22,7 +22,7 @@ from ui.windows.port_select import PortSelectWindow
 from ui.config.lacp import LACPInputWindow
 from ui.config.commut import CommutWindow
 from ui.config.vlan_popup import VlanPopupWindow
-from ui.config.universal import UniversalConfigWindow
+from ui.config.universal_config import UniversalConfigWindow
 from ui.config.device_config import SwitchConfigWindow, RouterConfigWindow
 
 # --- Менеджер и хелперы ---

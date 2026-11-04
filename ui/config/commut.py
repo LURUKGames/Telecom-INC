@@ -102,36 +102,45 @@ class CommutWindow(Window):
             self._btn_ok = pygame.Rect(self.x + 20, self.y + self.height - 50, 200, 36)
             self._btn_cancel = pygame.Rect(self.x + self.width - 180, self.y + self.height - 50, 160, 36)
 
-    def _submit_create(self):
-        """Создание нового шасси."""
+        def _submit_create(self):
+            """Создание нового шасси."""
         if len(self.selected) < 2:
-            self.error_msg = "Выберите 2+ устройства"
-            self._error_timer = 180
+            self.game.ui_manager.open_message_box("Ошибка", "Выберите 2+ устройства для объединения.")
             return
-        name = self.name_input.text.strip() or "Новое шасси"
+        
         ids = list(self.selected)
+        types = {self._find_equip(i)["type"] for i in ids}
+        if len(types) > 1:
+            self.game.ui_manager.open_message_box("Ошибка", "Нельзя объединять свитчи и роутеры вместе.")
+            return
+
+        name = self.name_input.text.strip() or "Новое шасси"
         self.close()
-        self.callback(ids[0], ids[1:], name, True)
+        # Передаем пустой список для remove_ids, так как это создание с нуля
+        self.callback(ids[0], ids[1:], name, True, [])
 
     def _submit_edit(self):
         """Применение изменений в существующем шасси."""
         eq = self.edit_eq
         if not eq: return
         
-        # 1. Удаляем платы, которые отметили крестиком
-        for bid in list(self.edit_remove_boards):
-            if bid == 1: continue # Базовую плату удалять нельзя
-            self.game.unmerge_equipment(eq, bid)
-            
-        # 2. Добавляем новые устройства (merge_equipment)
-        for oid in list(self.edit_add_ids):
+        # Проверка на добавление других типов устройств
+        types = {eq["type"]}
+        for oid in self.edit_add_ids:
             other = self._find_equip(oid)
-            if other:
-                self.game.merge_equipment(eq, other)
-                
-        # 3. Обновляем имя
-        eq["name"] = self.edit_name_input.text.strip() or eq.get("name", "Шасси")
+            if other: types.add(other["type"])
+        if len(types) > 1:
+            self.game.ui_manager.open_message_box("Ошибка", "Нельзя добавлять роутеры к свитчам (и наоборот).")
+            return
+
+        name = self.edit_name_input.text.strip() or eq.get("name", "Шасси")
+        remove_ids = list(self.edit_remove_boards)
+        add_ids = list(self.edit_add_ids)
         self.close()
+        
+        # ВАЖНО: вызываем коллбэк, чтобы родительское окно UCW обновило данные и применило имя
+        if self.callback:
+            self.callback(eq["id"], add_ids, name, False, remove_ids)
 
     def handle_event(self, event):
         self._layout()

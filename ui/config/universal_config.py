@@ -5,6 +5,8 @@ ui/universal_config.py - Главное окно настройки оборуд
 настраивать скорость, режим (access/trunk) и VLAN.
 """
 
+
+
 import pygame
 from config import (
     COLOR_TEXT, COLOR_TEXT_DIM, COLOR_TITLE, COLOR_STATUS_LACP, COLOR_LACP_ROW,
@@ -259,21 +261,34 @@ class UniversalConfigWindow(Window):
             self._compute_content_height()
         self.popup = LACPInputWindow(self.devices, self.game, None, on_submit, sw, sh)
 
-    def _open_merge_window(self):
-        sw, sh = _screen_size()
-        def on_merge(host_id, other_ids, name, is_new):
-            host = self._find_equip(host_id)
-            if not host: return
-            if is_new: host["name"] = name
-            for oid in other_ids:
-                other = self._find_equip(oid)
-                if other: self.game.merge_equipment(host, other)
-            self.devices = self._visible_devices(self.devices)
-            self._init_fields()
-            self._build_inputs()
-            self._compute_content_height()
-            self.active_section_eid = host["id"]
-        self.popup = CommutWindow(self.devices, self.game, on_merge, sw, sh)
+        def _open_merge_window(self):
+            sw, sh = _screen_size()
+            def on_merge(host_id, other_ids, name, is_new, remove_board_ids):
+                host = self._find_equip(host_id)
+                if not host: return
+                
+                # 1. Отсоединяем платы (если редактировали)
+                for bid in remove_board_ids:
+                    if bid == 1: continue # Базовую плату 1 не трогаем
+                    self.game.unmerge_equipment(host, bid)
+                    
+                # 2. Присоединяем новые
+                for oid in other_ids:
+                    other = self._find_equip(oid)
+                    if other: 
+                        self.game.merge_equipment(host, other)
+                
+                # 3. Применяем имя (сработает и для создания, и для редактирования)
+                if name:
+                    host["name"] = name
+                    
+                # 4. Обновляем UI
+                self.devices = self._visible_devices(self.devices)
+                self._init_fields()
+                self._build_inputs()
+                self._compute_content_height()
+                self.active_section_eid = host["id"]
+            self.popup = CommutWindow(self.devices, self.game, on_merge, sw, sh)
 
     def _toggle_admin_state(self, obj):
         obj["admin_state"] = "up" if obj.get("admin_state", "up") == "shut" else "shut"
