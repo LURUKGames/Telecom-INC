@@ -10,7 +10,7 @@ from config import (
     COLOR_SCROLLBAR_BG, COLOR_SCROLLBAR, COLOR_SCROLLBAR_HOVER,
     HEADER_H, TITLEBAR_H, SCROLL_STEP,
 )
-from ui.widgets import _vgrad_rect, _screen_size
+from ui.widgets import _vgrad_rect, screen_size
 
 MIN_W = 280
 MIN_H = 180
@@ -88,12 +88,12 @@ class Window:
         self.scroll_y = max(0, min(self.scroll_y, self.max_scroll()))
 
     def _clamp_to_screen(self):
-        sw, sh = _screen_size()
+        sw, sh = screen_size()
         self.x = max(0, min(self.x, sw - self.width))
         self.y = max(0, min(self.y, sh - self.height))
 
     def _clamp_size(self):
-        sw, sh = _screen_size()
+        sw, sh = screen_size()
         self.width = max(MIN_W, min(self.width, sw - self.x))
         self.height = max(MIN_H, min(self.height, sh - self.y))
 

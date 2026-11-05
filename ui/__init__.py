@@ -2,7 +2,7 @@
 """ui - пакет оконного интерфейса Telecom INC. Реэкспорт публичного API."""
 
 from ui.widgets import (
-    TextInput, speed_label, _vgrad_rect, _screen_size,
+    TextInput, speed_label, _vgrad_rect, screen_size,
     draw_fancy_button, draw_button_on, draw_button_screen,
 )
 from ui.net_helpers import (
@@ -32,7 +32,7 @@ from ui.chassis import port_name, board_of_port, boards_summary
 
 __all__ = [
     # widgets
-    "TextInput", "speed_label", "_vgrad_rect", "_screen_size",
+    "TextInput", "speed_label", "_vgrad_rect", "screen_size",
     "draw_fancy_button", "draw_button_on", "draw_button_screen",
     # helpers
     "find_cable_for_port", "port_in_lacp", "toggle_port_speed",

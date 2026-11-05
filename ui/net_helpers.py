@@ -7,6 +7,8 @@ from config import (
     COLOR_PORT_ERROR, COLOR_PORT_ERROR_HI, COLOR_PORT_MISMATCH, COLOR_PORT_LACP,
     COLOR_TARIFF,
 )
+from ui.chassis import port_name
+from ui.widgets import speed_label
 
 
 def find_cable_for_port(game, equip_id, port_index):
@@ -49,9 +51,44 @@ def toggle_port_speed(game, equip, port_index):
     _notify_speed_changed(game)
 
 
-def toggle_lacp_speed(grp, game=None):
-    grp["speed"] = 100 if grp.get("speed", 1000) == 1000 else 1000
+def toggle_lacp_speed(grp, equip, game=None):
+    """
+    Переключает скорость всей LACP-группы.
+    Возвращает None при успехе или строку с описанием ошибки.
+    """
+    current = grp.get("speed", 1000)
+    new_speed = 100 if current >= 1000 else 1000
+
+    blocked = []
+    for pi in grp["ports"]:
+        if not (0 <= pi < len(equip["ports"])):
+            continue
+        if new_speed == 1000:
+            cable = find_cable_for_port(game, equip["id"], pi)
+            if cable and cable["type"] == "cable_100":
+                blocked.append(pi)
+
+    if blocked:
+        names = ", ".join(port_name(None, equip, pi) for pi in blocked)
+        return f"Порты {names} не могут принять {speed_label(new_speed)} (ограничены кабелем 100Мб)"
+
+    grp["speed"] = new_speed
+    for pi in grp["ports"]:
+        if 0 <= pi < len(equip["ports"]):
+            equip["ports"][pi]["speed"] = new_speed
     _notify_speed_changed(game)
+    return None
+
+
+def lacp_effective_total(grp, equip):
+    """Суммарная скорость LACP = min(скорости портов) × count."""
+    if not grp["ports"]:
+        return 0
+    speeds = [equip["ports"][pi].get("speed", 1000)
+              for pi in grp["ports"] if 0 <= pi < len(equip["ports"])]
+    if not speeds:
+        return 0
+    return min(speeds) * len(speeds)
 
 
 def equip_type_label(equip):
@@ -69,8 +106,6 @@ def port_status_text_color(game, equip, port_index):
         if grp is not None:
             return f"В составе {grp['name']}", COLOR_STATUS_LACP
         return "Down", COLOR_STATUS_DOWN
-    # Порт физически используется — статус отражает кабель,
-    # даже если он входит в LACP (физика важнее для диагностики).
     cable = find_cable_for_port(game, equip["id"], port_index)
     if cable is not None:
         if cable.get("speed_mismatch"):

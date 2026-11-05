@@ -10,7 +10,7 @@ from config import (
 from ui.base import Window
 from ui.widgets import (
     _vgrad_rect, draw_fancy_button, draw_button_screen,
-    speed_label, TextInput, _screen_size,
+    speed_label, TextInput, screen_size,
 )
 from ui.net_helpers import (
     port_in_lacp, toggle_port_speed, toggle_lacp_speed,
@@ -208,7 +208,7 @@ class UniversalConfigWindow(Window):
 
     # --- ЛОГИКА ОКОН ---
     def _open_lacp_window(self):
-        sw, sh = _screen_size()
+        sw, sh = screen_size()
         def on_submit(selected, gid, name, is_edit):
             if not selected: return
             eq_id = selected[0][0]
@@ -230,7 +230,7 @@ class UniversalConfigWindow(Window):
         self.popup = LACPInputWindow(self.devices, self.game, None, on_submit, sw, sh)
 
     def _open_merge_window(self):
-        sw, sh = _screen_size()
+        sw, sh = screen_size()
         def on_merge(host_id, other_ids, name, is_new, remove_board_ids):
             host = self._find_equip(host_id)
             if not host: return
@@ -259,7 +259,7 @@ class UniversalConfigWindow(Window):
         obj["mode"] = "trunk" if obj.get("mode", "access") == "access" else "access"
 
     def _open_vlan_popup(self, kind, equip, ref):
-        sw, sh = _screen_size()
+        sw, sh = screen_size()
         if kind == "port":
             port = equip["ports"][ref]
             text, mode = port.get("vlan_string", ""), port.get("mode", "access")

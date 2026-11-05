@@ -7,7 +7,7 @@ from config import (
     COLOR_PORT_LACP_SEL, HEADER_H, FOOTER_H,
 )
 from ui.base import Window
-from ui.widgets import _vgrad_rect, draw_button_screen, TextInput
+from ui.widgets import _vgrad_rect, draw_button_screen, TextInput, aggregate_speed_label
 from ui.chassis import port_name
 from ui.net_helpers import equip_type_label
 
@@ -50,6 +50,10 @@ class LACPInputWindow(Window):
     def is_text_input_active(self):
         return self.id_input.active or self.name_input.active
 
+    def content_rect(self):
+        # Оставляем место снизу под кнопки "Создать"/"Отмена" (55px)
+        return pygame.Rect(self.x, self.y + HEADER_H, self.width, self.height - HEADER_H - 55)
+
     def _layout(self):
         self._cells = []
         start_x = self.x + 20
@@ -81,35 +85,44 @@ class LACPInputWindow(Window):
             rows = (len(eq["ports"]) + cols - 1) // cols
             row_y += rows * (box + gap) + 20
 
-    def _validate_and_submit(self):
-        try:
-            gid = int(self.id_input.text)
-            if not (1 <= gid <= 20): raise ValueError
-        except ValueError:
-            self.game.ui_manager.open_message_box("Ошибка", "Номер LACP должен быть от 1 до 20.")
-            return
+        def _validate_and_submit(self):
+            try:
+                gid = int(self.id_input.text)
+                if not (1 <= gid <= 20): raise ValueError
+            except ValueError:
+                self.game.ui_manager.open_message_box("Ошибка", "Номер LACP должен быть от 1 до 20.")
+                return
 
-        if not self.existing:
-            for eq in self.devices:
-                for g in eq.get("lacp_groups", []):
-                    if g["id"] == gid:
-                        self.game.ui_manager.open_message_box("Ошибка", f"LACP-{gid} уже существует.")
-                        return
+            if not self.existing:
+                for eq in self.devices:
+                    for g in eq.get("lacp_groups", []):
+                        if g["id"] == gid:
+                            self.game.ui_manager.open_message_box("Ошибка", f"LACP-{gid} уже существует.")
+                            return
 
-        if len(self.selected) < 2:
-            self.game.ui_manager.open_message_box("Ошибка", "Нужно выбрать минимум 2 порта.")
-            return
+            if len(self.selected) < 2:
+                self.game.ui_manager.open_message_box("Ошибка", "Нужно выбрать минимум 2 порта.")
+                return
 
-        eids = {eid for eid, _ in self.selected}
-        if len(eids) > 1:
-            self.game.ui_manager.open_message_box("Ошибка", "Порты должны быть на одном устройстве.")
-            return
+            eids = {eid for eid, _ in self.selected}
+            if len(eids) > 1:
+                self.game.ui_manager.open_message_box("Ошибка", "Порты должны быть на одном устройстве.")
+                return
 
-        cb = self.callback
-        sel = list(self.selected)
-        name = self.name_input.text.strip() or f"LACP-{gid}"
-        self.close()
-        cb(sel, gid, name, self.existing is not None)
+            # Собираем скорости выбранных портов
+            speeds = []
+            for eid, pi in self.selected:
+                for eq in self.devices:
+                    if eq["id"] == eid and 0 <= pi < len(eq["ports"]):
+                        speeds.append(eq["ports"][pi].get("speed", 1000))
+                        break
+            base_speed = min(speeds) if speeds else 1000
+
+            cb = self.callback
+            sel = list(self.selected)
+            name = self.name_input.text.strip() or f"LACP-{gid}"
+            self.close()
+            cb(sel, gid, name, self.existing is not None, base_speed)
 
     def handle_event(self, event):
         self._layout()

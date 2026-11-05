@@ -21,7 +21,15 @@ def speed_label(speed):
     return "100M"
 
 
-def _screen_size():
+def aggregate_speed_label(total_speed):
+    """Суммарная скорость (для LACP). 4000 → '4G', 400 → '400M'."""
+    if total_speed <= 0:
+        return "—"
+    if total_speed >= 1000:
+        return f"{total_speed // 1000}G"
+    return f"{total_speed}M"
+
+def screen_size():
     surf = pygame.display.get_surface()
     return surf.get_width(), surf.get_height()
 
