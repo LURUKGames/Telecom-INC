@@ -1,12 +1,8 @@
 #!/usr/bin/env python3
 """
-visualizer.py (v17) - сетевая песочница Telecom INC.
-
-Рефакторинг (Этап 1):
-  - константы      -> config.py
-  - камера         -> camera.py
-  - ЛЭП-граф/гео    -> pathfinding.py
-Здесь остаётся: игровое состояние (Game), отрисовка карты, run_game.
+visualizer.py (v20.16) - сетевая песочница Telecom INC.
+Исправлены критические баги: обрыв _finish_cable, ошибка с next_lacp_id в unmerge,
+переименование LACP в Po, добавление полей портов.
 """
 
 import math
@@ -25,7 +21,7 @@ from config import (
     MAX_CABLE_TILES,
     COLOR_BG, COLOR_GRASS, COLOR_ROAD, COLOR_HOUSE, COLOR_POLE, COLOR_DC,
     COLOR_EQUIP, COLOR_EQUIP_EDGE, COLOR_HOUSE_EQUIP_FILTER,
-    COLOR_CABLE_100M, COLOR_CABLE_1G,          # ← ДОБАВЛЕНЫ
+    COLOR_CABLE_100M, COLOR_CABLE_1G,
     COLOR_CABLE_ERROR, COLOR_CABLE_MISMATCH, COLOR_CABLE_NO_ROUTE,
     COLOR_CABLE_DC, COLOR_SELECTED, COLOR_TEXT,
     TERRAIN_COLORS, TILE_NAMES, EQUIP_INFO, TOOLS,
@@ -34,11 +30,11 @@ from config import (
 
 
 # --------------------------------------------------------------------------
-# СЕТЕВЫЕ ХЕЛПЕРЫ (временно здесь; на Этапе 2 уедут в network_model.py)
+# СЕТЕВЫЕ ХЕЛПЕРЫ
 # --------------------------------------------------------------------------
 def make_ports(count):
     return [{"free": True, "connection": None, "speed": 1000,
-             "mode": "access", "vlan": 1, "label": ""} for _ in range(count)]
+             "mode": "access", "vlan_string": "", "admin_state": "up", "label": ""} for _ in range(count)]
 
 
 def _effective_port_speed(equip, port_index):
@@ -50,8 +46,7 @@ def _effective_port_speed(equip, port_index):
 
 
 def recompute_speed_mismatch(game):
-    """Пересчитывает cable['speed_mismatch'] по ТЕКУЩИМ скоростям портов.
-    Кабель 100Мб форсит 100 на обоих концах — у него mismatch невозможен."""
+    """Пересчитывает cable['speed_mismatch'] по ТЕКУЩИМ скоростям портов."""
     for cable in game.cables:
         if cable.get("to_dc"):
             cable["speed_mismatch"] = False
@@ -141,7 +136,7 @@ class Game:
     def recompute_mismatch(self):
         recompute_speed_mismatch(self)
 
-    # ---- заглушки для совместимости (до ЧАСТИ 3) ----
+    # ---- заглушки для совместимости ----
     def chassis_of(self, _eid):
         return None
 
@@ -205,7 +200,7 @@ class Game:
         for grp in other.get("lacp_groups", []):
             new_grp = dict(grp)
             new_grp["id"] = next_lacp_id
-            new_grp["name"] = f"LACP-{next_lacp_id}"
+            new_grp["name"] = f"Po{next_lacp_id}"
             new_grp["ports"] = [p + offset for p in grp["ports"]]
             host["lacp_groups"].append(new_grp)
             next_lacp_id += 1
@@ -288,7 +283,7 @@ class Game:
             if inside and not outside:
                 new_grp = dict(grp)
                 new_grp["id"] = next_other_id
-                new_grp["name"] = f"LACP-{next_other_id}"
+                new_grp["name"] = f"Po{next_other_id}" # <--- ИСПРАВЛЕНО
                 new_grp["ports"] = [p - start for p in inside]
                 other_lacp.append(new_grp)
                 next_other_id += 1
@@ -610,7 +605,7 @@ class Game:
         return True
 
     def _finish_cable(self, tool, a, port_a, b, port_b):
-        # ФИКС: Если устройства в одном доме (координаты совпадают), делаем кабель коротким
+        # Если устройства в одном доме (координаты совпадают), делаем кабель коротким
         if a["x"] == b["x"] and a["y"] == b["y"]:
             points = [(a["x"], a["y"]), (b["x"], b["y"])]
             length = 2 # Фиксированная длина 2 тайла для коммутации внутри здания
@@ -629,9 +624,60 @@ class Game:
             print(f"Ошибка: недостаточно монет (нужно {cost}, есть {self.budget})")
             self.first_connection_point = None
             return False
+
+        if tool["type"] == "cable_100":
+            speed_a = speed_b = 100
+        else:
+            speed_a = a["ports"][port_a]["speed"]
+            speed_b = b["ports"][port_b]["speed"]
+
+        speed_mismatch = speed_a != speed_b
+        signal_ok = length <= MAX_CABLE_TILES
+
+        if not signal_ok:
+            print(f"⚠️ Длина кабеля {length} > {MAX_CABLE_TILES} тайл. Кабель проложен, но СИГНАЛ ПОТЕРЯН!")
+        if speed_mismatch:
+            print(f"⚠️ SPEED MISMATCH: порт A={speed_a}М, порт B={speed_b}М. Линк НЕ поднимется (Link Down)!")
+
+        self.budget -= cost
+        a["ports"][port_a]["free"] = False
+        a["ports"][port_a]["connection"] = {"to_id": b["id"], "to_port": port_b}
+        b["ports"][port_b]["free"] = False
+        b["ports"][port_b]["connection"] = {"to_id": a["id"], "to_port": port_a}
         
-        # ... остальной код метода остается без изменений ...
-        
+        if tool["type"] == "cable_100":
+            a["ports"][port_a]["speed"] = 100
+            b["ports"][port_b]["speed"] = 100
+
+        cable = {
+            "id": self._next_cable_id,
+            "type": tool["type"],
+            "a": a["id"], "port_a": port_a,
+            "b": b["id"], "port_b": port_b,
+            "points": points,
+            "length": length,
+            "cost": cost,
+            "signal_ok": signal_ok,
+            "speed_mismatch": speed_mismatch,
+            "speed_a": speed_a,
+            "speed_b": speed_b,
+        }
+        self._next_cable_id += 1
+        self.cables.append(cable)
+
+        recompute_speed_mismatch(self)
+
+        status = "OK"
+        if speed_mismatch:
+            status = "SPEED MISMATCH (Link Down)"
+        elif not signal_ok:
+            status = "СИГНАЛ ПОТЕРЯН"
+            
+        print(f"Проложен {tool['name']}: {EQUIP_INFO[a['type']]['name']} #{a['id']} "
+              f"(порт {port_a + 1}) - {EQUIP_INFO[b['type']]['name']} #{b['id']} "
+              f"(порт {port_b + 1}), {length} тайл., {cost} монет, {status}")
+        self.first_connection_point = None
+        return True
         
 
 # --------------------------------------------------------------------------
@@ -725,6 +771,8 @@ def draw_cables(screen, game, cam):
             pygame.draw.circle(screen, color, pts[0], max(4, int(round(9 * cam.zoom))), width)
         else:
             pygame.draw.lines(screen, color, False, pts, width)
+
+
 def draw_dashed_line(surface, color, start, end, dash_length=6):
     x1, y1 = start
     x2, y2 = end
@@ -849,7 +897,7 @@ def _house_centers(game):
 
 
 def draw_houses(screen, game, cam, fonts):
-    """Дома с оборудованием — синий фильтр + иконка + цифра; пустые остаются жёлтыми."""
+    """Дома с оборудованием — синий фильтр + иконка + цифра."""
     for house in game.houses:
         if house.get("type", "house") != "house":
             continue
@@ -891,7 +939,7 @@ def draw_houses(screen, game, cam, fonts):
 
 
 def draw_equipment(screen, game, cam, fonts):
-    """Оборудование на столбах ЛЭП (дома рисует draw_houses)."""
+    """Оборудование на столбах ЛЭП."""
     centers = _house_centers(game)
     groups = {}
     for e in game.equipment:

@@ -82,9 +82,11 @@ class AppWindow(Window):
         self._update_footer_layout()
         
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            # 1. Ручка ресайза
             if self.resizable and self.resize_rect().collidepoint(event.pos):
                 return super().handle_event(event)
                 
+            # 2. Футер
             if self._footer_rect.collidepoint(event.pos):
                 for rect, btn in self._button_rects:
                     if rect.collidepoint(event.pos):
@@ -93,14 +95,24 @@ class AppWindow(Window):
                         return True
                 return True
                 
+            # 3. Шапка (назад, закрыть, перетаскивание)
             if (self.titlebar_rect().collidepoint(event.pos) or 
                 self.close_rect().collidepoint(event.pos) or 
                 self.back_rect().collidepoint(event.pos)):
                 return super().handle_event(event)
                 
+            # 4. Скроллбар (отдаем базовому классу для перетаскивания ползунка)
+            thumb = self._scrollbar_thumb()
+            track = self._scrollbar_track()
+            if (thumb and thumb.collidepoint(event.pos)) or (track and track.collidepoint(event.pos)):
+                return super().handle_event(event)
+                
+            # 5. Клик по контенту - возвращаем False, чтобы наследник (draw_overlay) перехватил
             return False
             
+        # Для колесика, драга и ресайза
         return super().handle_event(event)
+    
 
     def _draw_footer(self, screen):
         pygame.draw.rect(screen, (40, 42, 50), self._footer_rect)
