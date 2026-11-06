@@ -11,10 +11,12 @@ from config import (
 from ui.base import Window
 from ui.widgets import (
     _vgrad_rect, draw_fancy_button, draw_button_screen, speed_label,
+    aggregate_speed_label,
 )
 from ui.net_helpers import (
     find_cable_for_port, port_in_lacp, toggle_port_speed, toggle_lacp_speed,
     port_fill_color, port_status_text_color, lacp_effective_label,
+    lacp_effective_total,
 )
 
 
@@ -128,7 +130,8 @@ class SwitchWindow(Window):
         pygame.draw.rect(surface, COLOR_LACP_ROW, prect, 2, border_radius=6)
         num = small_font.render(str(pidx + 1), True, COLOR_TEXT)
         surface.blit(num, (px + 4, py + 3))
-        sp = tiny.render(speed_label(grp.get("speed", 1000)), True, COLOR_TEXT)
+        total = grp.get("speed", 1000) * len(grp["ports"])
+        sp = tiny.render(aggregate_speed_label(total), True, COLOR_TEXT)
         surface.blit(sp, (px + self.box // 2 - sp.get_width() // 2,
                           py + self.box - 15))
         lbl = tiny.render(grp["name"], True, COLOR_LACP_ROW)
@@ -253,7 +256,9 @@ class RouterWindow(Window):
                 if kind == "port":
                     toggle_port_speed(self.game, equip, ref)
                 else:
-                    toggle_lacp_speed(ref, self.game)
+                    err = toggle_lacp_speed(ref, equip, self.game)
+                    if err and self.manager:
+                        self.manager.open_message_box("Ошибка скорости", err)
                 return
 
     def handle_event(self, event):
@@ -315,8 +320,9 @@ class RouterWindow(Window):
                 surface.blit(label, (42, ry + 2))
                 btn = pygame.Rect(310, ry, 110, 26)
                 hover = btn.collidepoint(mouse[0] - cr.x, mouse[1] - cr.y)
+                total = lacp_effective_total(grp, equip)
                 draw_fancy_button(surface, small_font, btn,
-                                  f"Скор: {speed_label(grp.get('speed', 1000))}",
+                                  f"Скор: {aggregate_speed_label(total)}",
                                   state="hover" if hover else "normal")
             y += self._equip_rows(equip) * self.row_h + self.block_gap
 

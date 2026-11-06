@@ -10,11 +10,12 @@ from config import (
 from ui.base import Window
 from ui.widgets import (
     _vgrad_rect, draw_fancy_button, draw_button_screen,
-    speed_label, TextInput, screen_size,
+    speed_label, aggregate_speed_label, TextInput, screen_size,
 )
 from ui.net_helpers import (
     port_in_lacp, toggle_port_speed, toggle_lacp_speed,
     equip_type_label, _notify_speed_changed, find_cable_for_port,
+    lacp_effective_total,
 )
 from ui.chassis import port_name, board_of_port, boards_summary
 from ui.config.lacp import LACPInputWindow
@@ -209,7 +210,7 @@ class UniversalConfigWindow(Window):
     # --- ЛОГИКА ОКОН ---
     def _open_lacp_window(self):
         sw, sh = screen_size()
-        def on_submit(selected, gid, name, is_edit):
+        def on_submit(selected, gid, name, is_edit, base_speed):
             if not selected: return
             eq_id = selected[0][0]
             eq = self._find_equip(eq_id)
@@ -220,10 +221,16 @@ class UniversalConfigWindow(Window):
                     if g["id"] == gid:
                         g["ports"] = ports
                         g["name"] = name
+                        g["speed"] = base_speed
+                        for pi in ports:
+                            eq["ports"][pi]["speed"] = base_speed
                         break
             else:
-                g = {"id": gid, "name": name, "ports": ports, "speed": 1000, "label": "", "mode": "trunk", "vlan_string": "", "admin_state": "up"}
+                g = {"id": gid, "name": name, "ports": ports, "speed": base_speed,
+                     "label": "", "mode": "trunk", "vlan_string": "", "admin_state": "up"}
                 eq.setdefault("lacp_groups", []).append(g)
+                for pi in ports:
+                    eq["ports"][pi]["speed"] = base_speed
             _notify_speed_changed(self.game)
             self._build_inputs()
             self._compute_content_height()
@@ -314,7 +321,10 @@ class UniversalConfigWindow(Window):
                             if port_in_lacp(equip, ref) is not None: return True
                             if _find_cable_100(self.game, equip["id"], ref): return True
                             toggle_port_speed(self.game, equip, ref)
-                        else: toggle_lacp_speed(ref, self.game)
+                        else:
+                            err = toggle_lacp_speed(ref, equip, self.game)
+                            if err:
+                                self.game.ui_manager.open_message_box("Ошибка скорости", err)
                         return True
 
                 for rect, kind, equip, ref in self._mode_hits:
@@ -412,7 +422,8 @@ class UniversalConfigWindow(Window):
                 name = self._cfg_font.render(grp["name"], True, COLOR_LACP_ROW)
                 surface.blit(name, (UCW_X_PORT, ry + 10))
                 members = ",".join(str(p + 1) for p in grp["ports"])
-                meta = self._tiny.render(f"порты: {members}", True, COLOR_LACP_ROW)
+                total = lacp_effective_total(grp, equip)
+                meta = self._tiny.render(f"{aggregate_speed_label(total)} · порты: {members}", True, COLOR_LACP_ROW)
                 surface.blit(meta, (UCW_X_PORT, ry + 28))
                 y += self.row_h
             y += UCW_SECTION_GAP
@@ -447,7 +458,8 @@ class UniversalConfigWindow(Window):
                         self._draw_mini_button(screen, rect, "LACP", disabled=True); continue
                     self._draw_mini_button(screen, rect, speed_label(equip["ports"][ref].get("speed", 1000)))
                 else:
-                    self._draw_mini_button(screen, rect, speed_label(ref.get("speed", 1000)))
+                    total = lacp_effective_total(ref, equip)
+                    self._draw_mini_button(screen, rect, aggregate_speed_label(total))
 
         for rect, kind, equip, ref in self._mode_hits:
             if cr.y - 30 <= rect.y <= cr.bottom:

@@ -85,45 +85,46 @@ class LACPInputWindow(Window):
             rows = (len(eq["ports"]) + cols - 1) // cols
             row_y += rows * (box + gap) + 20
 
-        def _validate_and_submit(self):
-            try:
-                gid = int(self.id_input.text)
-                if not (1 <= gid <= 20): raise ValueError
-            except ValueError:
-                self.game.ui_manager.open_message_box("Ошибка", "Номер LACP должен быть от 1 до 20.")
-                return
+            def _validate_and_submit(self):
+                try:
+                    gid = int(self.id_input.text)
+                    if not (1 <= gid <= 20): raise ValueError
+                except ValueError:
+                    self.game.ui_manager.open_message_box("Ошибка", "Номер LACP должен быть от 1 до 20.")
+                    return
 
-            if not self.existing:
-                for eq in self.devices:
-                    for g in eq.get("lacp_groups", []):
-                        if g["id"] == gid:
-                            self.game.ui_manager.open_message_box("Ошибка", f"LACP-{gid} уже существует.")
-                            return
+                if not self.existing:
+                    for eq in self.devices:
+                        for g in eq.get("lacp_groups", []):
+                            if g["id"] == gid:
+                                self.game.ui_manager.open_message_box("Ошибка", f"LACP-{gid} уже существует.")
+                                return
 
-            if len(self.selected) < 2:
-                self.game.ui_manager.open_message_box("Ошибка", "Нужно выбрать минимум 2 порта.")
-                return
+                if len(self.selected) < 2:
+                    self.game.ui_manager.open_message_box("Ошибка", "Нужно выбрать минимум 2 порта.")
+                    return
 
-            eids = {eid for eid, _ in self.selected}
-            if len(eids) > 1:
-                self.game.ui_manager.open_message_box("Ошибка", "Порты должны быть на одном устройстве.")
-                return
+                eids = {eid for eid, _ in self.selected}
+                if len(eids) > 1:
+                    self.game.ui_manager.open_message_box("Ошибка", "Порты должны быть на одном устройстве.")
+                    return
 
-            # Собираем скорости выбранных портов
-            speeds = []
-            for eid, pi in self.selected:
-                for eq in self.devices:
-                    if eq["id"] == eid and 0 <= pi < len(eq["ports"]):
-                        speeds.append(eq["ports"][pi].get("speed", 1000))
-                        break
-            base_speed = min(speeds) if speeds else 1000
+                # Собираем скорости выбранных портов
+                speeds = []
+                for eid, pi in self.selected:
+                    for eq in self.devices:
+                        if eq["id"] == eid and 0 <= pi < len(eq["ports"]):
+                            speeds.append(eq["ports"][pi].get("speed", 1000))
+                            break
+                base_speed = min(speeds) if speeds else 1000
 
-            cb = self.callback
-            sel = list(self.selected)
-            name = self.name_input.text.strip() or f"LACP-{gid}"
-            self.close()
-            cb(sel, gid, name, self.existing is not None, base_speed)
-
+                cb = self.callback
+                sel = list(self.selected)
+                name = self.name_input.text.strip() or f"LACP-{gid}"
+                self.close()
+                cb(sel, gid, name, self.existing is not None, base_speed)
+                
+                
     def handle_event(self, event):
         self._layout()
         if event.type == pygame.KEYDOWN:
@@ -176,6 +177,26 @@ class LACPInputWindow(Window):
         self.id_input.draw(screen, self._font)
         screen.blit(small_font.render("Имя:", True, COLOR_TEXT), (self.x + 220, self.y + HEADER_H + 16))
         self.name_input.draw(screen, self._font)
+        
+                # Превью суммарной скорости
+        if self.selected:
+            speeds = []
+            for eid, pi in self.selected:
+                for eq in self.devices:
+                    if eq["id"] == eid and 0 <= pi < len(eq["ports"]):
+                        speeds.append(eq["ports"][pi].get("speed", 1000))
+                        break
+            if speeds:
+                base = min(speeds)
+                total = base * len(speeds)
+                if len(set(speeds)) > 1:
+                    sp_text = f"Итог: {aggregate_speed_label(total)} (смешанные → min)"
+                    sp_color = (255, 200, 100)
+                else:
+                    sp_text = f"Итог: {aggregate_speed_label(total)}"
+                    sp_color = (100, 255, 100)
+                sp_surf = self._font.render(sp_text, True, sp_color)
+                screen.blit(sp_surf, (self.x + 500, self.y + HEADER_H + 16))
         
         old_clip = screen.get_clip()
         screen.set_clip(self.content_rect())
