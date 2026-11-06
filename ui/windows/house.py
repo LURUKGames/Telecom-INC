@@ -1,25 +1,38 @@
 #!/usr/bin/env python3
-"""ui/house.py - окно дома. Кнопка "Оборудование" открывает UCW."""
+"""ui/windows/house.py - окно дома."""
 
 import pygame
-
 from config import (
     COLOR_TEXT, COLOR_TEXT_DIM, COLOR_STATUS_UP,
-    HEADER_H, FOOTER_H,
 )
-from ui.base import Window
-from ui.widgets import draw_fancy_button
+from ui.app_window import AppWindow
 
-
-class HouseWindow(Window):
+class HouseWindow(AppWindow):
     def __init__(self, house, screen_w, screen_h, game=None):
-        w, h = 350, 250
+        w, h = 400, 280
         x = (screen_w - w) // 2
         y = (screen_h - h) // 2
-        super().__init__(x, y, w, h, f"Дом #{house['id']}")
         self.house = house
         self.game = game
-        self._equip_btn = pygame.Rect(0, 0, 0, 0)
+        
+        devices = self._house_devices()
+        
+        buttons = [
+            {
+                "text": "⚙ Оборудование" if devices else "Нет оборудования",
+                "callback": self._open_universal_config,
+                "disabled": not devices
+            },
+            {
+                "text": "Инфо (тест)",
+                "callback": lambda: print("Инфо"),
+            }
+        ]
+        
+        super().__init__(x, y, w, h, f"Дом #{house['id']}", buttons=buttons)
+        
+        # Задаем высоту контента (чтобы работал скролл, если окно сжать)
+        self.content_height = 16 + 3 * 34 + 16 
 
     def _house_loc(self):
         return (self.house["x"] + self.house["width"] // 2,
@@ -28,35 +41,24 @@ class HouseWindow(Window):
     def _house_devices(self):
         if self.game is None:
             return []
-        # ВАЖНО: отфильтровать поглощённые при Merge
         return [d for d in self.game.equipment_at.get(self._house_loc(), [])
                 if not d.get("is_merged_into")]
-
-    def handle_event(self, event):
-        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            if self._equip_btn.collidepoint(event.pos):
-                self._open_universal_config()
-                return True
-        return super().handle_event(event)
 
     def _open_universal_config(self):
         if self.game is None:
             return
         devices = self._house_devices()
         if not devices:
-            print(f"В доме #{self.house['id']} нет оборудования")
             return
-        # КРИТИЧЕСКИЙ ФИКС: НЕ вызываем self.close()!
-        # Менеджер сам положит HouseWindow в стек, чтобы "Назад" работал.
         self.game.ui_manager.open_universal_config(devices)
 
-    def draw(self, screen, font, small_font):
-        self._draw_frame(screen, font)
-        x = self.x + 18
-        y = self.y + HEADER_H + 16
+    def _render_content(self, surface, font, small_font):
+        x = 18
+        y = 16
         floors = self.house.get("floors", "?")
         clients = self.house.get("clients", "?")
         devices = self._house_devices()
+        
         lines = [
             (f"Этажей: {floors}", COLOR_TEXT),
             (f"Жителей: {clients}", COLOR_TEXT),
@@ -65,15 +67,7 @@ class HouseWindow(Window):
         ]
         for text, col in lines:
             surf = font.render(text, True, col)
-            screen.blit(surf, (x, y))
+            surface.blit(surf, (x, y))
             y += 34
-        self._equip_btn = pygame.Rect(self.x + self.width // 2 - 90,
-                                      self.y + self.height - FOOTER_H + 2, 180, 34)
-        mouse = pygame.mouse.get_pos()
-        if not devices:
-            draw_fancy_button(screen, small_font, self._equip_btn,
-                              "Нет оборудования", state="disabled")
-        else:
-            state = "hover" if self._equip_btn.collidepoint(mouse) else "normal"
-            draw_fancy_button(screen, small_font, self._equip_btn,
-                              "⚙ Оборудование", state=state)
+            
+            

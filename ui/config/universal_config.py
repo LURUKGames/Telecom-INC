@@ -4,10 +4,10 @@
 import pygame
 from config import (
     COLOR_TEXT, COLOR_TEXT_DIM, COLOR_TITLE, COLOR_STATUS_LACP, COLOR_LACP_ROW,
-    HEADER_H, FOOTER_H, COL_NUM, COL_STATUS, COL_INPUT, COL_INPUT_W,
+    HEADER_H, COL_NUM, COL_STATUS, COL_INPUT, COL_INPUT_W,
     COL_SPEED, COL_SPEED_W, ROW_H_CFG,
 )
-from ui.base import Window
+from ui.app_window import AppWindow
 from ui.widgets import (
     _vgrad_rect, draw_fancy_button, draw_button_screen,
     speed_label, aggregate_speed_label, TextInput, screen_size,
@@ -17,7 +17,7 @@ from ui.net_helpers import (
     equip_type_label, _notify_speed_changed, find_cable_for_port,
     lacp_effective_total,
 )
-from ui.chassis import port_name, board_of_port, boards_summary
+from ui.chassis import port_name
 from ui.config.lacp import LACPInputWindow
 from ui.config.commut import CommutWindow
 from ui.config.vlan_popup import VlanPopupWindow
@@ -37,15 +37,12 @@ UCW_X_VLAN = 420
 UCW_VLAN_W = 110
 UCW_SECTION_HDR_H = 34
 UCW_SECTION_GAP = 10
-UCW_FOOTER_H = 50
 
 COLOR_LINK_UP = (60, 190, 90)
 COLOR_LINK_DOWN = (210, 70, 70)
 COLOR_LINK_EDGE = (230, 230, 230)
 COLOR_BTN_DIS_BG = (60, 60, 66)
 COLOR_BTN_DIS_EDGE = (95, 95, 105)
-COLOR_SEL_SECTION = (70, 130, 200)
-COLOR_MODE_BANNER = (50, 90, 150)
 
 def _ensure_port_fields(port):
     port.setdefault("admin_state", "up")
@@ -86,12 +83,21 @@ def _find_cable_100(game, equip_id, port_index):
         if a_match or b_match: return cable["type"] == "cable_100"
     return False
 
-class UniversalConfigWindow(Window):
+
+class UniversalConfigWindow(AppWindow):
     def __init__(self, devices, screen_w, screen_h, game=None):
         w, h = 720, 620
         x = (screen_w - w) // 2
         y = (screen_h - h) // 2
-        super().__init__(x, y, w, h, "Конфигурация оборудования")
+        
+        buttons = [
+            {"text": "LACP", "callback": self._open_lacp_window},
+            {"text": "Commut", "callback": self._open_merge_window},
+            {"text": "Save", "callback": self._save},
+        ]
+        
+        super().__init__(x, y, w, h, "Конфигурация оборудования", buttons=buttons)
+        
         self.game = game
         self.row_h = UCW_ROW_H
         self._cfg_font = pygame.font.SysFont("arial,dejavusans", 14)
@@ -113,10 +119,6 @@ class UniversalConfigWindow(Window):
         self._mode_hits = []
         self._vlan_hits = []
 
-        self._btn_lacp = pygame.Rect(0, 0, 0, 0)
-        self._btn_commut = pygame.Rect(0, 0, 0, 0)
-        self._btn_save = pygame.Rect(0, 0, 0, 0)
-
         self._compute_content_height()
 
     def _visible_devices(self, devices):
@@ -137,12 +139,9 @@ class UniversalConfigWindow(Window):
             for grp in equip["lacp_groups"]:
                 self.inputs[("lacp", equip["id"], grp["id"])] = TextInput((0,0,UCW_DESC_W,26), initial_text=grp.get("label",""), max_length=20)
 
-    def content_rect(self):
-        return pygame.Rect(self.x, self.y + HEADER_H, self.width, self.height - HEADER_H - UCW_FOOTER_H)
-
     def on_resized(self):
+        super().on_resized()
         self._compute_content_height()
-        self._clamp_scroll()
 
     def _section_rows(self, equip):
         return 1 + len(equip["ports"]) + len(equip["lacp_groups"])
@@ -194,13 +193,6 @@ class UniversalConfigWindow(Window):
             ti = self.inputs.get(key)
             if ti: ti.set_rect(rect)
 
-        fx = self.x + 10
-        fy = self.y + self.height - UCW_FOOTER_H + 10
-        bw, bh, gap = 110, 30, 6
-        self._btn_lacp = pygame.Rect(fx, fy, bw, bh)
-        self._btn_commut = pygame.Rect(fx + (bw + gap), fy, bw, bh)
-        self._btn_save = pygame.Rect(self.x + self.width - bw - 10, fy, bw, bh)
-
     def is_text_input_active(self):
         if self.popup is not None: return True
         return any(ti.active for ti in self.inputs.values())
@@ -222,7 +214,6 @@ class UniversalConfigWindow(Window):
                         g["speed"] = base_speed
                         for pi in ports:
                             eq["ports"][pi]["speed"] = base_speed
-                            eq["ports"][pi]["label"] = f"LACP in {g['name']}" if not eq["ports"][pi].get("label") else eq["ports"][pi]["label"]
                         break
             else:
                 g = {"id": gid, "name": f"Po{gid}", "ports": ports, "speed": base_speed,
@@ -230,7 +221,6 @@ class UniversalConfigWindow(Window):
                 eq.setdefault("lacp_groups", []).append(g)
                 for pi in ports:
                     eq["ports"][pi]["speed"] = base_speed
-                    eq["ports"][pi]["label"] = f"LACP in {g['name']}" if not eq["ports"][pi].get("label") else eq["ports"][pi]["label"]
             
             _notify_speed_changed(self.game)
             self._build_inputs()
@@ -284,22 +274,16 @@ class UniversalConfigWindow(Window):
             if self.popup is not None and self.popup.is_closed: self.popup = None
             return handled or True
 
-        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            thumb = self._scrollbar_thumb()
-            if thumb and thumb.collidepoint(event.pos):
-                return super().handle_event(event)
+        if super().handle_event(event):
+            return True
 
         if event.type == pygame.KEYDOWN:
             for ti in self.inputs.values():
                 if ti.active: return ti.handle_event(event, self._cfg_font)
-            return super().handle_event(event)
+            return False
 
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             self._sync_positions()
-
-            if self._btn_save.collidepoint(event.pos): self._save(); return True
-            if self._btn_lacp.collidepoint(event.pos): self._open_lacp_window(); return True
-            if self._btn_commut.collidepoint(event.pos): self._open_merge_window(); return True
 
             if self.content_rect().collidepoint(event.pos):
                 for rect, equip in self._section_hits:
@@ -346,7 +330,7 @@ class UniversalConfigWindow(Window):
 
                 for ti in self.inputs.values(): ti.active = False
                 return True
-        return super().handle_event(event)
+        return False
 
     def _save(self):
         for key, ti in self.inputs.items():
@@ -384,48 +368,47 @@ class UniversalConfigWindow(Window):
         draw_fancy_button(screen, self._tiny, rect, text, state=state, radius=5)
 
     def _render_content(self, surface, font, small_font):
+        # Только фон активной секции
         y = 10
         for equip in self.devices:
-            ry = y - self.scroll_y
-            hdr_rect = pygame.Rect(0, ry, surface.get_width(), UCW_SECTION_HDR_H)
+            hdr_rect = pygame.Rect(0, y, surface.get_width(), UCW_SECTION_HDR_H)
             if equip["id"] == self.active_section_eid:
                 pygame.draw.rect(surface, (50, 70, 100), hdr_rect)
+            y += self.row_h
+            y += len(equip["ports"]) * self.row_h
+            y += len(equip["lacp_groups"]) * self.row_h
+            y += UCW_SECTION_GAP
+
+    def draw_overlay(self, screen, font, small_font):
+        self._sync_positions()
+        cr = self.content_rect()
+        
+        # 1. Текстовые заголовки и номера портов
+        y = cr.y + 10 - self.scroll_y
+        for equip in self.devices:
             custom_name = equip.get("name")
             base_title = custom_name if custom_name else equip_type_label(equip)
             boards_n = len(equip.get("boards", []))
             label_text = f"{base_title} #{equip['id']}" + (f"  [ШАССИ, плат: {boards_n}]" if boards_n > 1 else "")
             hdr = self._header_font.render(label_text, True, COLOR_TITLE)
-            surface.blit(hdr, (UCW_X_PORT, ry + 10))
+            screen.blit(hdr, (cr.x + UCW_X_PORT, y + 10))
             y += self.row_h
-
+            
             for i, port in enumerate(equip["ports"]):
-                ry = y - self.scroll_y
-                if ry + self.row_h < 0 or ry > surface.get_height():
-                    y += self.row_h; continue
                 pname = port_name(self.game, equip, i) if self.game else f"{i + 1}"
                 in_lacp = port_in_lacp(equip, i) is not None
                 col = COLOR_STATUS_LACP if in_lacp else COLOR_TEXT
                 num = self._cfg_font.render(pname, True, col)
-                surface.blit(num, (UCW_X_PORT, ry + 15))
+                screen.blit(num, (cr.x + UCW_X_PORT, y + 15))
                 y += self.row_h
-
+                
             for grp in equip["lacp_groups"]:
-                ry = y - self.scroll_y
-                if ry + self.row_h < 0 or ry > surface.get_height():
-                    y += self.row_h; continue
                 name = self._cfg_font.render(grp["name"], True, COLOR_LACP_ROW)
-                surface.blit(name, (UCW_X_PORT, ry + 15))
+                screen.blit(name, (cr.x + UCW_X_PORT, y + 15))
                 y += self.row_h
             y += UCW_SECTION_GAP
 
-    def draw(self, screen, font, small_font):
-        self._draw_frame(screen, font)
-        self._draw_content(screen, font, small_font)
-        self._sync_positions()
-        cr = self.content_rect()
-        old_clip = screen.get_clip()
-        screen.set_clip(cr)
-
+        # 2. Кнопки и поля ввода
         for rect, equip, pi, kind, ref in self._link_hits:
             if cr.y - 30 <= rect.y <= cr.bottom:
                 state = _port_link_state(equip["ports"][pi]) if kind == "port" else _lacp_link_state(equip, ref)
@@ -465,16 +448,7 @@ class UniversalConfigWindow(Window):
                     text = _vlan_preview(ref.get("vlan_string", ""))
                 self._draw_mini_button(screen, rect, text)
 
-        screen.set_clip(old_clip)
-
-        footer_bg = pygame.Rect(self.x, self.y + self.height - UCW_FOOTER_H, self.width, UCW_FOOTER_H)
-        pygame.draw.rect(screen, (40, 42, 50), footer_bg)
-        pygame.draw.line(screen, (90, 90, 100), (footer_bg.x, footer_bg.y), (footer_bg.right, footer_bg.y), 1)
-
-        self._draw_mini_button(screen, self._btn_lacp, "LACP")
-        self._draw_mini_button(screen, self._btn_commut, "Commut")
-        self._draw_mini_button(screen, self._btn_save, "Save")
-
+    def draw_popup(self, screen, font, small_font):
         if self.popup is not None:
             self.popup.draw(screen, font, small_font)
             

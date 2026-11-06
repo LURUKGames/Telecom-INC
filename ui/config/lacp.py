@@ -4,20 +4,18 @@
 import pygame
 from config import (
     COLOR_TEXT, COLOR_TEXT_DIM, COLOR_PORT_EDGE, COLOR_PORT_LACP,
-    COLOR_PORT_LACP_SEL, HEADER_H, FOOTER_H,
+    COLOR_PORT_LACP_SEL,
 )
-from ui.base import Window
-from ui.widgets import _vgrad_rect, draw_button_screen, TextInput, aggregate_speed_label
+from ui.app_window import AppWindow
+from ui.widgets import _vgrad_rect, TextInput, aggregate_speed_label
 from ui.chassis import port_name
 from ui.net_helpers import equip_type_label
 
-class LACPInputWindow(Window):
+class LACPInputWindow(AppWindow):
     def __init__(self, devices, game, existing_group, callback, screen_w, screen_h):
         w, h = 760, 560
         x = (screen_w - w) // 2
         y = (screen_h - h) // 2
-        title = "Редактирование LACP" if existing_group else "Создание LACP"
-        super().__init__(x, y, w, h, title)
         
         self.devices = devices
         self.game = game
@@ -42,35 +40,40 @@ class LACPInputWindow(Window):
         self.name_input = TextInput((0, 0, 200, 26), initial_text=self.descriptor, max_length=20)
         
         self._cells = []
-        self._ok_btn = pygame.Rect(0, 0, 0, 0)
-        self._cancel_btn = pygame.Rect(0, 0, 0, 0)
         self._font = pygame.font.SysFont("arial,dejavusans", 14)
         self._small = pygame.font.SysFont("arial,dejavusans", 11)
 
-    def is_text_input_active(self):
-        return self.id_input.active or self.name_input.active
-
-    def content_rect(self):
-        return pygame.Rect(self.x, self.y + HEADER_H, self.width, self.height - HEADER_H - 55)
-
-    def _layout(self):
-        self._cells = []
-        start_x = self.x + 20
-        start_y = self.y + HEADER_H + 70 - self.scroll_y
+        buttons = [
+            {"text": "Сохранить" if self.existing else "Создать", "callback": self._validate_and_submit},
+            {"text": "Отмена", "callback": self.close}
+        ]
         
+        title = "Редактирование LACP" if existing_group else "Создание LACP"
+        super().__init__(x, y, w, h, title, buttons=buttons)
+        
+        self._update_content_height()
+
+    def _update_content_height(self):
         box, gap, cols = 40, 6, 10
-        
         total_h = 0
         for eq in self.devices:
             total_h += 24 
             rows = (len(eq["ports"]) + cols - 1) // cols
             total_h += rows * (box + gap) + 20
-        self.content_height = total_h + 20
+        self.content_height = total_h + 80 
 
-        self.id_input.set_rect((self.x + 100, self.y + HEADER_H + 10, 50, 26))
-        self.name_input.set_rect((self.x + 280, self.y + HEADER_H + 10, 200, 26))
-        self._ok_btn = pygame.Rect(self.x + 20, self.y + self.height - 44, 220, 32)
-        self._cancel_btn = pygame.Rect(self.x + self.width - 200, self.y + self.height - 44, 180, 32)
+    def is_text_input_active(self):
+        return self.id_input.active or self.name_input.active
+
+    def _layout(self):
+        self._cells = []
+        start_x = self.x + 20
+        start_y = self.content_rect().y + 70 - self.scroll_y
+        
+        box, gap, cols = 40, 6, 10
+
+        self.id_input.set_rect((self.x + 100, self.content_rect().y + 10, 50, 26))
+        self.name_input.set_rect((self.x + 280, self.content_rect().y + 10, 200, 26))
 
         row_y = start_y
         for eq in self.devices:
@@ -124,39 +127,22 @@ class LACPInputWindow(Window):
 
     def handle_event(self, event):
         self._layout()
+        
+        # AppWindow проверит кнопки футера, ресайз и шапку
+        if super().handle_event(event):
+            return True
+
         if event.type == pygame.KEYDOWN:
             if self.id_input.active: return self.id_input.handle_event(event, self._font)
             if self.name_input.active: return self.name_input.handle_event(event, self._font)
-            if event.key == pygame.K_ESCAPE: self.close(); return True
-            if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER): self._validate_and_submit(); return True
-
-        if event.type == pygame.MOUSEWHEEL:
-            if self.content_rect().collidepoint(pygame.mouse.get_pos()):
-                self.scroll_y -= event.y * 30
-                self.scroll_y = max(0, min(self.scroll_y, self.max_scroll()))
-                return True
-                
-        # Фоллбэк для колесика мыши
-        if event.type == pygame.MOUSEBUTTONDOWN and event.button in (4, 5):
-            if self.content_rect().collidepoint(pygame.mouse.get_pos()):
-                self.scroll_y -= (1 if event.button == 4 else -1) * 30
-                self.scroll_y = max(0, min(self.scroll_y, self.max_scroll()))
-                return True
+            return False
 
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            if self.close_rect().collidepoint(event.pos) or self.back_rect().collidepoint(event.pos):
-                self.close(); return True
-            if self._ok_btn.collidepoint(event.pos): self._validate_and_submit(); return True
-            if self._cancel_btn.collidepoint(event.pos): self.close(); return True
-            
+            # Поля ввода
             if self.id_input.handle_event(event, self._font): return True
             if self.name_input.handle_event(event, self._font): return True
-            if self.titlebar_rect().collidepoint(event.pos):
-                self.dragging = True
-                self.drag_offset_x = event.pos[0] - self.x
-                self.drag_offset_y = event.pos[1] - self.y
-                return True
 
+            # Клик по контенту
             if self.content_rect().collidepoint(event.pos):
                 for rect, eq, pi in self._cells:
                     if rect.collidepoint(event.pos):
@@ -169,19 +155,19 @@ class LACPInputWindow(Window):
                         if key in self.selected: self.selected.remove(key)
                         else: self.selected.append(key)
                         return True
-                        
-        return super().handle_event(event)
+        return False
 
-    def draw(self, screen, font, small_font):
-        self._draw_frame(screen, font)
+    def draw_overlay(self, screen, font, small_font):
         self._layout()
-        mouse = pygame.mouse.get_pos()
+        cr = self.content_rect()
         
-        screen.blit(small_font.render("Номер (1-20):", True, COLOR_TEXT), (self.x + 20, self.y + HEADER_H + 16))
+        # 1. Отрисовка полей ввода (они в шапке)
+        screen.blit(small_font.render("Номер (1-20):", True, COLOR_TEXT), (self.x + 20, cr.y + 16))
         self.id_input.draw(screen, self._font)
-        screen.blit(small_font.render("Дескрипшн:", True, COLOR_TEXT), (self.x + 220, self.y + HEADER_H + 16))
+        screen.blit(small_font.render("Дескрипшн:", True, COLOR_TEXT), (self.x + 220, cr.y + 16))
         self.name_input.draw(screen, self._font)
         
+        # 2. Итоговая скорость
         if self.selected:
             speeds = []
             for eid, pi in self.selected:
@@ -199,53 +185,41 @@ class LACPInputWindow(Window):
                     sp_text = f"Итог: {aggregate_speed_label(total)}"
                     sp_color = (100, 255, 100)
                 sp_surf = self._font.render(sp_text, True, sp_color)
-                screen.blit(sp_surf, (self.x + 500, self.y + HEADER_H + 16))
-        
-        old_clip = screen.get_clip()
-        screen.set_clip(self.content_rect())
-        
+                screen.blit(sp_surf, (self.x + 500, cr.y + 16))
+
+        # 3. Отрисовка сетки портов
+        mouse = pygame.mouse.get_pos()
+        for rect, eq, pi in self._cells:
+            if not cr.colliderect(rect): continue
+            
+            is_selected = (eq["id"], pi) in self.selected
+            in_other = any(pi in g["ports"] and (not self.existing or g["id"] != self.existing["id"]) for g in eq.get("lacp_groups", []))
+            
+            if in_other: color = (110, 110, 120)
+            elif is_selected: color = (50, 200, 50)
+            else: color = (200, 50, 50)
+                
+            hover = rect.collidepoint(mouse)
+            edge = (255,255,255) if (is_selected or hover) else (150,150,150)
+            
+            _vgrad_rect(screen, rect, tuple(min(255, c + 30) for c in color), color, radius=6)
+            pygame.draw.rect(screen, edge, rect, 2 if (is_selected or hover) else 1, border_radius=6)
+            
+            pname = port_name(self.game, eq, pi)
+            txt = self._small.render(pname, True, (255,255,255))
+            screen.blit(txt, (rect.centerx - txt.get_width()//2, rect.centery - txt.get_height()//2))
+            
+        # 4. Заголовки устройств
         start_x = self.x + 20
-        row_y = self.y + HEADER_H + 70 - self.scroll_y
+        row_y = cr.y + 70 - self.scroll_y
         box, gap, cols = 40, 6, 10
-        
         for eq in self.devices:
             label = f"{equip_type_label(eq)} #{eq['id']}"
             if len(eq.get("boards", [])) > 1: label += f" [ШАССИ, плат: {len(eq['boards'])}]"
             hdr = small_font.render(label, True, (200, 220, 255))
             screen.blit(hdr, (start_x, row_y))
-            row_y += 24
             
-            for i, port in enumerate(eq["ports"]):
-                c = i % cols
-                r = i // cols
-                px = start_x + c * (box + gap)
-                py = row_y + r * (box + gap)
-                rect = pygame.Rect(px, py, box, box)
-                
-                is_selected = (eq["id"], i) in self.selected
-                in_other = any(i in g["ports"] and (not self.existing or g["id"] != self.existing["id"]) for g in eq.get("lacp_groups", []))
-                
-                if in_other: color = (110, 110, 120)
-                elif is_selected: color = (50, 200, 50)
-                else: color = (200, 50, 50)
-                    
-                hover = rect.collidepoint(mouse) and self.content_rect().collidepoint(mouse)
-                edge = (255,255,255) if (is_selected or hover) else (150,150,150)
-                
-                _vgrad_rect(screen, rect, tuple(min(255, c + 30) for c in color), color, radius=6)
-                pygame.draw.rect(screen, edge, rect, 2 if (is_selected or hover) else 1, border_radius=6)
-                
-                pname = port_name(self.game, eq, i)
-                txt = self._small.render(pname, True, (255,255,255))
-                screen.blit(txt, (rect.centerx - txt.get_width()//2, rect.centery - txt.get_height()//2))
-                
             rows = (len(eq["ports"]) + cols - 1) // cols
-            row_y += rows * (box + gap) + 20
+            row_y += 24 + rows * (box + gap) + 20
             
-        screen.set_clip(old_clip)
-        self._draw_scrollbar(screen)
-        
-        draw_button_screen(screen, small_font, self._ok_btn, f"✔ {'Сохранить' if self.existing else 'Создать'} ({len(self.selected)})")
-        draw_button_screen(screen, small_font, self._cancel_btn, "Отмена")
-        
-        
+            
