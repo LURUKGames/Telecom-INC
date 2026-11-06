@@ -9,16 +9,10 @@ from ui.windows.datacenter import DatacenterWindow, DCTariffWindow
 from ui.windows.port_select import PortSelectWindow
 from ui.config.universal_config import UniversalConfigWindow
 from ui.config.device_config import SwitchConfigWindow, RouterConfigWindow
-from ui.base import Window, MessageBox
-
+from ui.base import MessageBox
 
 
 class UIWindowManager:
-    
-    def open_message_box(self, title, text):
-        sw, sh = self._screen_size()
-        self._set_active(MessageBox(title, text, sw, sh))
-    
     def __init__(self, game):
         self.game = game
         self.active_window = None
@@ -29,8 +23,7 @@ class UIWindowManager:
         return surf.get_width(), surf.get_height()
 
     def _set_active(self, win, push=True):
-        if win is None:
-            return
+        if win is None: return
         win.manager = self
         if push and self.active_window is not None and not self.active_window.is_closed:
             self.window_stack.append(self.active_window)
@@ -52,32 +45,30 @@ class UIWindowManager:
         self.active_window = None
         self.window_stack.clear()
 
+    def open_message_box(self, title, text):
+        sw, sh = self._screen_size()
+        self._set_active(MessageBox(title, text, sw, sh))
+
     # ---- открытие окон ----
     def open_house(self, house):
-        if house is None:
-            return
+        if house is None: return
         sw, sh = self._screen_size()
         self._set_active(HouseWindow(house, sw, sh, game=self.game))
 
     def open_universal_config(self, devices):
-        if not devices:
-            return
+        if not devices: return
         sw, sh = self._screen_size()
         self._set_active(UniversalConfigWindow(devices, sw, sh, game=self.game))
 
     def open_switch(self, equipment_list):
-        if not equipment_list:
-            return
+        if not equipment_list: return
         sw, sh = self._screen_size()
-        self._set_active(SwitchWindow(equipment_list, sw, sh,
-                                      game=self.game, manager=self))
+        self._set_active(SwitchWindow(equipment_list, sw, sh, game=self.game, manager=self))
 
     def open_router(self, equipment_list):
-        if not equipment_list:
-            return
+        if not equipment_list: return
         sw, sh = self._screen_size()
-        self._set_active(RouterWindow(equipment_list, sw, sh,
-                                      game=self.game, manager=self))
+        self._set_active(RouterWindow(equipment_list, sw, sh, game=self.game, manager=self))
 
     def open_switch_config(self, equip):
         sw, sh = self._screen_size()
@@ -93,17 +84,13 @@ class UIWindowManager:
 
     def open_dc_tariff_selection(self, callback, existing_tariff=None):
         sw, sh = self._screen_size()
-        self._set_active(DCTariffWindow(callback, sw, sh,
-                                        existing_tariff=existing_tariff))
+        self._set_active(DCTariffWindow(callback, sw, sh, existing_tariff=existing_tariff))
 
     def open_port_selection(self, devices_list, is_second_click, callback):
-        if not devices_list:
-            return
+        if not devices_list: return
         sw, sh = self._screen_size()
-        self._set_active(PortSelectWindow(devices_list, is_second_click,
-                                          callback, sw, sh, game=self.game))
+        self._set_active(PortSelectWindow(devices_list, is_second_click, callback, sw, sh, game=self.game))
 
-    # ---- старое API ----
     def close_active(self):
         if self.active_window is not None:
             self.active_window.close()
@@ -113,17 +100,13 @@ class UIWindowManager:
         return self.active_window is not None and not self.active_window.is_closed
 
     def is_port_selection_active(self):
-        return (isinstance(self.active_window, PortSelectWindow)
-                and not self.active_window.is_closed)
+        return (isinstance(self.active_window, PortSelectWindow) and not self.active_window.is_closed)
 
     def is_text_input_active(self):
-        return (self.active_window is not None
-                and not self.active_window.is_closed
-                and self.active_window.is_text_input_active())
+        return (self.active_window is not None and not self.active_window.is_closed and self.active_window.is_text_input_active())
 
     def handle_event(self, event):
-        if self.active_window is None:
-            return False
+        if self.active_window is None: return False
         if self.active_window.is_closed:
             if self.window_stack:
                 prev = self.window_stack.pop()
@@ -135,14 +118,22 @@ class UIWindowManager:
 
         win = self.active_window
 
-        if event.type == pygame.MOUSEMOTION and (
-                win.dragging or win.resizing or win.scroll_dragging):
+        if event.type == pygame.MOUSEMOTION and (win.dragging or win.resizing or win.scroll_dragging):
             return win.handle_event(event)
 
+        # Обработка колесика мыши
         if event.type == pygame.MOUSEWHEEL:
             mouse = pygame.mouse.get_pos()
             if win.contains(mouse):
                 win.scroll(event.y)
+                return True
+            return False
+            
+        # Фоллбэк для мышек, которые шлют кнопки 4 и 5 вместо MOUSEWHEEL
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button in (4, 5):
+            mouse = pygame.mouse.get_pos()
+            if win.contains(mouse):
+                win.scroll(1 if event.button == 4 else -1)
                 return True
             return False
 

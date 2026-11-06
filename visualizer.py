@@ -176,8 +176,14 @@ class Game:
         if host is other:
             print("Merge: нельзя объединить с самим собой")
             return False
-        if host["type"] != other["type"]:
-            print("Merge: типы устройств не совпадают")
+        # Проверяем, что оба устройства - свитчи ИЛИ оба - роутеры
+        is_switch_host = host["type"] in ("switch_12", "switch_24")
+        is_switch_other = other["type"] in ("switch_12", "switch_24")
+        is_router_host = host["type"] == "router"
+        is_router_other = other["type"] == "router"
+
+        if not ((is_switch_host and is_switch_other) or (is_router_host and is_router_other)):
+            print("Merge: нельзя объединять свитчи и роутеры вместе")
             return False
         if other.get("is_merged_into"):
             print("Merge: устройство уже объединено")

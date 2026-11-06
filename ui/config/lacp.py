@@ -13,7 +13,7 @@ from ui.net_helpers import equip_type_label
 
 class LACPInputWindow(Window):
     def __init__(self, devices, game, existing_group, callback, screen_w, screen_h):
-        w, h = 760, 580
+        w, h = 760, 560
         x = (screen_w - w) // 2
         y = (screen_h - h) // 2
         title = "Редактирование LACP" if existing_group else "Создание LACP"
@@ -27,7 +27,7 @@ class LACPInputWindow(Window):
         
         if existing_group:
             self.group_id = existing_group["id"]
-            self.name = existing_group.get("name", f"LACP-{self.group_id}")
+            self.descriptor = existing_group.get("label", "")
             for eq in self.devices:
                 for grp in eq.get("lacp_groups", []):
                     if grp["id"] == self.group_id:
@@ -36,10 +36,10 @@ class LACPInputWindow(Window):
         else:
             all_ids = [g["id"] for eq in self.devices for g in eq.get("lacp_groups", [])]
             self.group_id = max(all_ids, default=0) + 1
-            self.name = f"LACP-{self.group_id}"
+            self.descriptor = ""
             
         self.id_input = TextInput((0, 0, 60, 26), initial_text=str(self.group_id), max_length=2, allowed_chars="0123456789")
-        self.name_input = TextInput((0, 0, 200, 26), initial_text=self.name, max_length=20)
+        self.name_input = TextInput((0, 0, 200, 26), initial_text=self.descriptor, max_length=20)
         
         self._cells = []
         self._ok_btn = pygame.Rect(0, 0, 0, 0)
@@ -51,7 +51,6 @@ class LACPInputWindow(Window):
         return self.id_input.active or self.name_input.active
 
     def content_rect(self):
-        # Оставляем место снизу под кнопки "Создать"/"Отмена" (55px)
         return pygame.Rect(self.x, self.y + HEADER_H, self.width, self.height - HEADER_H - 55)
 
     def _layout(self):
@@ -59,7 +58,7 @@ class LACPInputWindow(Window):
         start_x = self.x + 20
         start_y = self.y + HEADER_H + 70 - self.scroll_y
         
-        box, gap, cols = 34, 4, 10
+        box, gap, cols = 40, 6, 10
         
         total_h = 0
         for eq in self.devices:
@@ -85,46 +84,44 @@ class LACPInputWindow(Window):
             rows = (len(eq["ports"]) + cols - 1) // cols
             row_y += rows * (box + gap) + 20
 
-            def _validate_and_submit(self):
-                try:
-                    gid = int(self.id_input.text)
-                    if not (1 <= gid <= 20): raise ValueError
-                except ValueError:
-                    self.game.ui_manager.open_message_box("Ошибка", "Номер LACP должен быть от 1 до 20.")
-                    return
+    def _validate_and_submit(self):
+        try:
+            gid = int(self.id_input.text)
+            if not (1 <= gid <= 20): raise ValueError
+        except ValueError:
+            self.game.ui_manager.open_message_box("Ошибка", "Номер LACP должен быть от 1 до 20.")
+            return
 
-                if not self.existing:
-                    for eq in self.devices:
-                        for g in eq.get("lacp_groups", []):
-                            if g["id"] == gid:
-                                self.game.ui_manager.open_message_box("Ошибка", f"LACP-{gid} уже существует.")
-                                return
+        if not self.existing:
+            for eq in self.devices:
+                for g in eq.get("lacp_groups", []):
+                    if g["id"] == gid:
+                        self.game.ui_manager.open_message_box("Ошибка", f"LACP-{gid} уже существует.")
+                        return
 
-                if len(self.selected) < 2:
-                    self.game.ui_manager.open_message_box("Ошибка", "Нужно выбрать минимум 2 порта.")
-                    return
+        if len(self.selected) < 2:
+            self.game.ui_manager.open_message_box("Ошибка", "Нужно выбрать минимум 2 порта.")
+            return
 
-                eids = {eid for eid, _ in self.selected}
-                if len(eids) > 1:
-                    self.game.ui_manager.open_message_box("Ошибка", "Порты должны быть на одном устройстве.")
-                    return
+        eids = {eid for eid, _ in self.selected}
+        if len(eids) > 1:
+            self.game.ui_manager.open_message_box("Ошибка", "Порты должны быть на одном устройстве.")
+            return
 
-                # Собираем скорости выбранных портов
-                speeds = []
-                for eid, pi in self.selected:
-                    for eq in self.devices:
-                        if eq["id"] == eid and 0 <= pi < len(eq["ports"]):
-                            speeds.append(eq["ports"][pi].get("speed", 1000))
-                            break
-                base_speed = min(speeds) if speeds else 1000
+        speeds = []
+        for eid, pi in self.selected:
+            for eq in self.devices:
+                if eq["id"] == eid and 0 <= pi < len(eq["ports"]):
+                    speeds.append(eq["ports"][pi].get("speed", 1000))
+                    break
+        base_speed = min(speeds) if speeds else 1000
 
-                cb = self.callback
-                sel = list(self.selected)
-                name = self.name_input.text.strip() or f"LACP-{gid}"
-                self.close()
-                cb(sel, gid, name, self.existing is not None, base_speed)
-                
-                
+        cb = self.callback
+        sel = list(self.selected)
+        desc = self.name_input.text.strip()
+        self.close()
+        cb(sel, gid, desc, self.existing is not None, base_speed)
+
     def handle_event(self, event):
         self._layout()
         if event.type == pygame.KEYDOWN:
@@ -132,6 +129,19 @@ class LACPInputWindow(Window):
             if self.name_input.active: return self.name_input.handle_event(event, self._font)
             if event.key == pygame.K_ESCAPE: self.close(); return True
             if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER): self._validate_and_submit(); return True
+
+        if event.type == pygame.MOUSEWHEEL:
+            if self.content_rect().collidepoint(pygame.mouse.get_pos()):
+                self.scroll_y -= event.y * 30
+                self.scroll_y = max(0, min(self.scroll_y, self.max_scroll()))
+                return True
+                
+        # Фоллбэк для колесика мыши
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button in (4, 5):
+            if self.content_rect().collidepoint(pygame.mouse.get_pos()):
+                self.scroll_y -= (1 if event.button == 4 else -1) * 30
+                self.scroll_y = max(0, min(self.scroll_y, self.max_scroll()))
+                return True
 
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if self.close_rect().collidepoint(event.pos) or self.back_rect().collidepoint(event.pos):
@@ -160,12 +170,6 @@ class LACPInputWindow(Window):
                         else: self.selected.append(key)
                         return True
                         
-        if event.type == pygame.MOUSEWHEEL:
-            if self.content_rect().collidepoint(pygame.mouse.get_pos()):
-                self.scroll_y -= event.y * 30
-                self.scroll_y = max(0, min(self.scroll_y, self.max_scroll()))
-                return True
-                
         return super().handle_event(event)
 
     def draw(self, screen, font, small_font):
@@ -175,10 +179,9 @@ class LACPInputWindow(Window):
         
         screen.blit(small_font.render("Номер (1-20):", True, COLOR_TEXT), (self.x + 20, self.y + HEADER_H + 16))
         self.id_input.draw(screen, self._font)
-        screen.blit(small_font.render("Имя:", True, COLOR_TEXT), (self.x + 220, self.y + HEADER_H + 16))
+        screen.blit(small_font.render("Дескрипшн:", True, COLOR_TEXT), (self.x + 220, self.y + HEADER_H + 16))
         self.name_input.draw(screen, self._font)
         
-                # Превью суммарной скорости
         if self.selected:
             speeds = []
             for eid, pi in self.selected:
@@ -244,3 +247,5 @@ class LACPInputWindow(Window):
         
         draw_button_screen(screen, small_font, self._ok_btn, f"✔ {'Сохранить' if self.existing else 'Создать'} ({len(self.selected)})")
         draw_button_screen(screen, small_font, self._cancel_btn, "Отмена")
+        
+        

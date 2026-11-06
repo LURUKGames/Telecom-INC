@@ -10,7 +10,7 @@ from config import (
     COLOR_SCROLLBAR_BG, COLOR_SCROLLBAR, COLOR_SCROLLBAR_HOVER,
     HEADER_H, TITLEBAR_H, SCROLL_STEP,
 )
-from ui.widgets import _vgrad_rect, screen_size
+from ui.widgets import _vgrad_rect, screen_size, draw_button_screen
 
 MIN_W = 280
 MIN_H = 180
@@ -334,31 +334,40 @@ class Window:
 class MessageBox(Window):
     """Простое окно с сообщением и кнопкой OK."""
     def __init__(self, title, text, screen_w, screen_h):
-        w, h = 380, 200
+        w, h = 420, 180
         x = (screen_w - w) // 2
         y = (screen_h - h) // 2
         super().__init__(x, y, w, h, title)
         self.text = text
-        self._ok_btn = pygame.Rect(self.x + self.width//2 - 60, self.y + h - 55, 120, 32)
         self._small_font = pygame.font.SysFont("arial,dejavusans", 14)
+        self._ok_btn = pygame.Rect(0, 0, 0, 0)
+
+    def _layout(self):
+        # Пересчитываем каждый кадр
+        self._ok_btn = pygame.Rect(self.x + self.width//2 - 60, self.y + self.height - 50, 120, 32)
 
     def handle_event(self, event):
+        self._layout()
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if self._ok_btn.collidepoint(event.pos):
+                self.close()
+                return True
+            if self.close_rect().collidepoint(event.pos):
                 self.close()
                 return True
         return super().handle_event(event)
 
     def draw(self, screen, font, small_font):
         self._draw_frame(screen, font)
+        self._layout()
+        
         lines = self.text.split("\n")
         y = self.y + HEADER_H + 20
         for line in lines:
             txt = self._small_font.render(line, True, (255,255,255))
             screen.blit(txt, (self.x + 20, y))
             y += 20
-        # Кнопка OK (используем простой прямоугольник, чтобы не зависеть от widgets)
-        pygame.draw.rect(screen, (60, 170, 60), self._ok_btn, border_radius=6)
-        pygame.draw.rect(screen, (150, 200, 150), self._ok_btn, 1, border_radius=6)
-        ok_txt = self._small_font.render("OK", True, (255,255,255))
-        screen.blit(ok_txt, (self._ok_btn.centerx - ok_txt.get_width()//2, self._ok_btn.centery - ok_txt.get_height()//2))
+            
+        draw_button_screen(screen, small_font, self._ok_btn, "OK")
+        
+        

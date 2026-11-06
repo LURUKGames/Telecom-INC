@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ui/commut.py - Окно для объединения устройств в единое шасси."""
+"""ui/config/commut.py - Окно для объединения устройств в единое шасси."""
 
 import pygame
 from config import COLOR_TEXT, COLOR_TEXT_DIM, COLOR_TITLE, HEADER_H, FOOTER_H
@@ -37,6 +37,12 @@ class CommutWindow(Window):
         for d in self.devices:
             if d["id"] == eid: return d
         return None
+
+    def _types_match(self, t1, t2):
+        switches = ("switch_12", "switch_24")
+        if t1 in switches and t2 in switches: return True
+        if t1 == "router" and t2 == "router": return True
+        return False
 
     def _layout(self):
         self._btns = []
@@ -84,11 +90,14 @@ class CommutWindow(Window):
         if len(self.selected) < 2:
             self.game.ui_manager.open_message_box("Ошибка", "Выберите 2+ устройства для объединения.")
             return
+        
         ids = list(self.selected)
-        types = {self._find_equip(i)["type"] for i in ids}
-        if len(types) > 1:
-            self.game.ui_manager.open_message_box("Ошибка", "Нельзя объединять свитчи и роутеры вместе.")
-            return
+        base_type = self._find_equip(ids[0])["type"]
+        for i in ids[1:]:
+            if not self._types_match(base_type, self._find_equip(i)["type"]):
+                self.game.ui_manager.open_message_box("Ошибка", "Нельзя объединять свитчи и роутеры вместе.")
+                return
+
         name = self.name_input.text.strip() or "Новое шасси"
         self.close()
         self.callback(ids[0], ids[1:], name, True, [])
@@ -96,13 +105,13 @@ class CommutWindow(Window):
     def _submit_edit(self):
         eq = self.edit_eq
         if not eq: return
-        types = {eq["type"]}
+        
         for oid in self.edit_add_ids:
             other = self._find_equip(oid)
-            if other: types.add(other["type"])
-        if len(types) > 1:
-            self.game.ui_manager.open_message_box("Ошибка", "Нельзя добавлять роутеры к свитчам (и наоборот).")
-            return
+            if other and not self._types_match(eq["type"], other["type"]):
+                self.game.ui_manager.open_message_box("Ошибка", "Нельзя добавлять роутеры к свитчам (и наоборот).")
+                return
+
         name = self.edit_name_input.text.strip() or eq.get("name", "Шасси")
         remove_ids = list(self.edit_remove_boards)
         add_ids = list(self.edit_add_ids)
@@ -179,14 +188,17 @@ class CommutWindow(Window):
                 edge = (100, 200, 255) if is_chassis else (150, 150, 150)
                 pygame.draw.rect(screen, bg, rect, border_radius=6)
                 pygame.draw.rect(screen, edge, rect, 2 if is_chassis else 1, border_radius=6)
+                
                 label = f"{equip_type_label(obj)} #{obj['id']}"
                 if is_chassis: label += f"  [ШАССИ: {obj.get('name', '')}, плат: {len(obj['boards'])}]"
                 txt = self._font.render(label, True, COLOR_TEXT)
                 screen.blit(txt, (rect.x + 15, rect.centery - txt.get_height()//2))
+                
                 if is_chassis:
                     pencil = self._small.render("✎", True, (200, 220, 255))
                     screen.blit(pencil, (rect.right - 30, rect.centery - pencil.get_height()//2))
             draw_button_screen(screen, small_font, self._btn_plus, "+ Commut")
+        
         elif self.mode == "create":
             screen.blit(small_font.render("Имя шасси:", True, COLOR_TEXT), (self.x + 20, self.y + HEADER_H + 48))
             self.name_input.draw(screen, self._font)
@@ -199,10 +211,12 @@ class CommutWindow(Window):
                 screen.blit(txt, (rect.x + 15, rect.centery - txt.get_height()//2))
             draw_button_screen(screen, small_font, self._btn_ok, f"✔ Создать ({len(self.selected)})")
             draw_button_screen(screen, small_font, self._btn_cancel, "Отмена")
+            
         elif self.mode == "edit":
             screen.blit(small_font.render("Имя шасси:", True, COLOR_TEXT), (self.x + 20, self.y + HEADER_H + 48))
             self.edit_name_input.draw(screen, self._font)
-            screen.blit(small_font.render("Платы (× — убрать) и свободные устройства (клик — добавить):", True, COLOR_TEXT_DIM), (self.x + 20, self.y + HEADER_H + 68))
+            screen.blit(small_font.render("Платы (× — убрать) и свободные (клик — добавить):", True, COLOR_TEXT_DIM), (self.x + 20, self.y + HEADER_H + 68))
+            
             for kind, rect, obj in self._btns:
                 if kind == "edit_x":
                     pygame.draw.rect(screen, (200, 60, 60), rect, border_radius=4)
@@ -219,5 +233,8 @@ class CommutWindow(Window):
                     pygame.draw.rect(screen, (200,200,200), rect, 1, border_radius=6)
                     txt = self._small.render(f"{equip_type_label(obj)} #{obj['id']}", True, COLOR_TEXT)
                     screen.blit(txt, (rect.x + 10, rect.centery - txt.get_height()//2))
+                    
             draw_button_screen(screen, small_font, self._btn_ok, "✔ Сохранить")
             draw_button_screen(screen, small_font, self._btn_cancel, "Отмена")
+            
+            

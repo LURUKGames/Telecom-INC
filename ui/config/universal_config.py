@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ui/universal_config.py - Главное окно настройки оборудования (UCW)."""
+"""ui/config/universal_config.py - Главное окно настройки оборудования."""
 
 import pygame
 from config import (
@@ -22,7 +22,6 @@ from ui.config.lacp import LACPInputWindow
 from ui.config.commut import CommutWindow
 from ui.config.vlan_popup import VlanPopupWindow
 
-# --- Константы геометрии окна UCW ---
 UCW_ROW_H = 46
 UCW_X_PORT = 10
 UCW_X_LINK = 50
@@ -40,7 +39,6 @@ UCW_SECTION_HDR_H = 34
 UCW_SECTION_GAP = 10
 UCW_FOOTER_H = 50
 
-# --- Цвета ---
 COLOR_LINK_UP = (60, 190, 90)
 COLOR_LINK_DOWN = (210, 70, 70)
 COLOR_LINK_EDGE = (230, 230, 230)
@@ -135,9 +133,9 @@ class UniversalConfigWindow(Window):
         self.inputs = {}
         for equip in self.devices:
             for i, port in enumerate(equip["ports"]):
-                self.inputs[("port", equip["id"], i)] = TextInput((0,0,UCW_DESC_W,26), initial_text=port.get("label",""), max_length=15)
+                self.inputs[("port", equip["id"], i)] = TextInput((0,0,UCW_DESC_W,26), initial_text=port.get("label",""), max_length=20)
             for grp in equip["lacp_groups"]:
-                self.inputs[("lacp", equip["id"], grp["id"])] = TextInput((0,0,UCW_DESC_W,26), initial_text=grp.get("label",""), max_length=15)
+                self.inputs[("lacp", equip["id"], grp["id"])] = TextInput((0,0,UCW_DESC_W,26), initial_text=grp.get("label",""), max_length=20)
 
     def content_rect(self):
         return pygame.Rect(self.x, self.y + HEADER_H, self.width, self.height - HEADER_H - UCW_FOOTER_H)
@@ -207,7 +205,6 @@ class UniversalConfigWindow(Window):
         if self.popup is not None: return True
         return any(ti.active for ti in self.inputs.values())
 
-    # --- ЛОГИКА ОКОН ---
     def _open_lacp_window(self):
         sw, sh = screen_size()
         def on_submit(selected, gid, name, is_edit, base_speed):
@@ -216,21 +213,25 @@ class UniversalConfigWindow(Window):
             eq = self._find_equip(eq_id)
             if not eq: return
             ports = sorted(pi for e, pi in selected if e == eq_id)
+            
             if is_edit:
                 for g in eq.get("lacp_groups", []):
                     if g["id"] == gid:
                         g["ports"] = ports
-                        g["name"] = name
+                        g["label"] = name
                         g["speed"] = base_speed
                         for pi in ports:
                             eq["ports"][pi]["speed"] = base_speed
+                            eq["ports"][pi]["label"] = f"LACP in {g['name']}" if not eq["ports"][pi].get("label") else eq["ports"][pi]["label"]
                         break
             else:
-                g = {"id": gid, "name": name, "ports": ports, "speed": base_speed,
-                     "label": "", "mode": "trunk", "vlan_string": "", "admin_state": "up"}
+                g = {"id": gid, "name": f"Po{gid}", "ports": ports, "speed": base_speed,
+                     "label": name, "mode": "trunk", "vlan_string": "", "admin_state": "up"}
                 eq.setdefault("lacp_groups", []).append(g)
                 for pi in ports:
                     eq["ports"][pi]["speed"] = base_speed
+                    eq["ports"][pi]["label"] = f"LACP in {g['name']}" if not eq["ports"][pi].get("label") else eq["ports"][pi]["label"]
+            
             _notify_speed_changed(self.game)
             self._build_inputs()
             self._compute_content_height()
@@ -241,16 +242,12 @@ class UniversalConfigWindow(Window):
         def on_merge(host_id, other_ids, name, is_new, remove_board_ids):
             host = self._find_equip(host_id)
             if not host: return
-            # Отсоединяем
             for bid in remove_board_ids:
                 if bid != 1: self.game.unmerge_equipment(host, bid)
-            # Присоединяем
             for oid in other_ids:
                 other = self._find_equip(oid)
                 if other: self.game.merge_equipment(host, other)
-            # Имя
             if name: host["name"] = name
-            # Обновляем список (подтягиваем вынырнувшие)
             loc = (host["x"], host["y"])
             self.devices = [d for d in self.game.equipment_at.get(loc, []) if not d.get("is_merged_into")]
             self._init_fields()
@@ -344,10 +341,6 @@ class UniversalConfigWindow(Window):
                         return True
 
                 for key, rect in self._desc_rects.items():
-                    kind, eid = key[0], key[1]
-                    equip = self._find_equip(eid)
-                    if equip is None: continue
-                    if kind == "port" and port_in_lacp(equip, key[2]) is not None: continue
                     ti = self.inputs.get(key)
                     if ti is not None and ti.handle_event(event, self._cfg_font): return True
 
@@ -397,9 +390,10 @@ class UniversalConfigWindow(Window):
             hdr_rect = pygame.Rect(0, ry, surface.get_width(), UCW_SECTION_HDR_H)
             if equip["id"] == self.active_section_eid:
                 pygame.draw.rect(surface, (50, 70, 100), hdr_rect)
-            title = equip_type_label(equip)
+            custom_name = equip.get("name")
+            base_title = custom_name if custom_name else equip_type_label(equip)
             boards_n = len(equip.get("boards", []))
-            label_text = f"{title} #{equip['id']}" + (f"  [ШАССИ, плат: {boards_n}]" if boards_n > 1 else "")
+            label_text = f"{base_title} #{equip['id']}" + (f"  [ШАССИ, плат: {boards_n}]" if boards_n > 1 else "")
             hdr = self._header_font.render(label_text, True, COLOR_TITLE)
             surface.blit(hdr, (UCW_X_PORT, ry + 10))
             y += self.row_h
@@ -420,11 +414,7 @@ class UniversalConfigWindow(Window):
                 if ry + self.row_h < 0 or ry > surface.get_height():
                     y += self.row_h; continue
                 name = self._cfg_font.render(grp["name"], True, COLOR_LACP_ROW)
-                surface.blit(name, (UCW_X_PORT, ry + 10))
-                members = ",".join(str(p + 1) for p in grp["ports"])
-                total = lacp_effective_total(grp, equip)
-                meta = self._tiny.render(f"{aggregate_speed_label(total)} · порты: {members}", True, COLOR_LACP_ROW)
-                surface.blit(meta, (UCW_X_PORT, ry + 28))
+                surface.blit(name, (UCW_X_PORT, ry + 15))
                 y += self.row_h
             y += UCW_SECTION_GAP
 
@@ -442,11 +432,6 @@ class UniversalConfigWindow(Window):
                 self._draw_link_pill(screen, rect, state)
 
         for key, rect in self._desc_rects.items():
-            kind, eid = key[0], key[1]
-            equip = self._find_equip(eid)
-            if equip is None: continue
-            if kind == "port" and port_in_lacp(equip, key[2]) is not None:
-                self._draw_mini_button(screen, rect, "—", disabled=True); continue
             if cr.y - 30 <= rect.y <= cr.bottom:
                 ti = self.inputs.get(key)
                 if ti: ti.draw(screen, self._cfg_font)
@@ -492,3 +477,5 @@ class UniversalConfigWindow(Window):
 
         if self.popup is not None:
             self.popup.draw(screen, font, small_font)
+            
+            

@@ -35,9 +35,42 @@ class VlanPopupWindow(Window):
     def is_text_input_active(self):
         return self.vlan_input.active
 
+    def _validate(self, text):
+        text = text.strip()
+        if not text: return True
+        
+        if self.mode == "access":
+            if "," in text or "-" in text: return False
+            try:
+                n = int(text)
+                return 1 <= n <= 4092
+            except ValueError:
+                return False
+        else:
+            for part in text.split(","):
+                part = part.strip()
+                if not part: continue
+                if "-" in part:
+                    try:
+                        a, b = part.split("-")
+                        a, b = int(a.strip()), int(b.strip())
+                        if not (1 <= a <= 4092 and 1 <= b <= 4092 and a <= b): return False
+                    except ValueError:
+                        return False
+                else:
+                    try:
+                        n = int(part)
+                        if not (1 <= n <= 4092): return False
+                    except ValueError:
+                        return False
+            return True
+
     def _apply(self):
         text = self.vlan_input.text.strip()
-        # Базовая проверка (детали опустим для краткости, но она должна быть)
+        if not self._validate(text):
+            self.error_msg = f"Ошибка! {self._hint}"
+            self._error_timer = 180
+            return
         cb = self.callback
         self.close()
         cb(text)
@@ -60,6 +93,14 @@ class VlanPopupWindow(Window):
         self._draw_frame(screen, font)
         hs = self._font.render(self._hint, True, COLOR_TEXT_DIM)
         screen.blit(hs, (self.x + 30, self.y + HEADER_H + 10))
+        
+        if self._error_timer > 0:
+            self._error_timer -= 1
+            err = self._font.render(self.error_msg, True, (255, 80, 80))
+            screen.blit(err, (self.x + 30, self.y + HEADER_H + 50))
+            
         self.vlan_input.draw(screen, self._font)
         draw_button_screen(screen, small_font, self._apply_btn, "✔ Применить")
         draw_button_screen(screen, small_font, self._cancel_btn, "Отмена")
+        
+        
